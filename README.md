@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="SoundSphere logo" width="160">
+  <img src="logo.png" alt="SoundSphere logo" width="300">
 </p>
 
 # SoundSphere
