@@ -71,7 +71,7 @@ Configurable via the popup settings panel and options page:
 
 All settings are stored locally using `browser.storage.sync`.
 
-Known limitations
+### Known limitations
 
 SoundSphere works best on normal HTML5 audio/video players: YouTube, embedded videos, simple audio players, etc.
 
