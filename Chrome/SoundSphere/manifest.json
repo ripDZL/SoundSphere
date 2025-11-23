@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "SoundSphere",
+  "version": "1.0.0",
+  "description": "Boost tab volume up to 800%, add voice or bass emphasis, and quickly switch between playing audio tabs.",
+  "icons": {
+    "16": "icon/speaker16px.png",
+    "32": "icon/speaker32px.png",
+    "48": "icon/speaker48px.png",
+    "128": "icon/speaker128px.png"
+  },
+  "permissions": [
+    "tabs",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon/speaker16px.png",
+      "32": "icon/speaker32px.png",
+      "48": "icon/speaker48px.png",
+      "128": "icon/speaker128px.png"
+    }
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SoundSphere</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="main">
+    <div class="header">
+      <h1>SoundSphere</h1>
+      <button id="gearBtn" title="Settings">
+        <img src="icon/gear32px.png" width="20" height="20" alt="Settings">
+      </button>
+    </div>
+
+    <div class="volume-display">100%</div>
+    <input
+      type="range"
+      id="volumeSlider"
+      min="0"
+      max="800"
+      value="100"
+      class="slider"
+    >
+    <div id="volumeWarning" class="volume-warning"></div>
+
+    <div class="controls">
+      <button id="muteBtn" class="btn">Mute</button>
+    </div>
+
+    <div class="mode-buttons">
+      <button id="defaultBtn" class="btn active">Default</button>
+      <button id="voiceBtn" class="btn">Voice boost</button>
+      <button id="bassBtn" class="btn">Bass boost</button>
+    </div>
+
+    <button id="resetBtn" class="btn reset">Reset to 100% volume</button>
+
+    <div class="tabs-section">
+      <div class="tabs-header">
+        Playing Tabs <span id="tabCount">0</span>
+      </div>
+      <div id="tabsList"></div>
+    </div>
+  </div>
+
+  <div id="settingsPanel" class="panel">
+    <div class="panel-header">
+      <span>Settings</span>
+      <button id="closePanel">×</button>
+    </div>
+
+    <label>
+      <input type="checkbox" id="showBadge" checked>
+      Show badge count
+    </label>
+
+    <label>
+      <input type="checkbox" id="rememberVolume" checked>
+      Remember volume per tab
+    </label>
+
+    <label>
+      <input type="checkbox" id="startAt100">
+      Always start at 100%
+    </label>
+
+    <label>
+      <input type="checkbox" id="overdrive">
+      Experimental Overdrive Mode (may distort)
+    </label>
+
+    <div class="panel-footer">
+      <div class="repo-link">
+        SoundSphere GitHub ·
+        <a
+          href="https://github.com/ripDZL/SoundSphere"
+          target="_blank"
+          rel="noreferrer"
+        >
+          View source on GitHub
+        </a>
+      </div>
+
+      <button id="savePanel">Save &amp; Close</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

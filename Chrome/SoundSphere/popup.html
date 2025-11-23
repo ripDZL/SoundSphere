@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="main">
+    <div class="header">
+      <h1>SoundSphere</h1>
+      <button id="gearBtn" title="Settings" class="icon-button">
+        <img src="icon/gear32px.png" width="20" height="20" alt="Settings">
+      </button>
+    </div>
+
+    <div class="volume-display">100%</div>
+
+    <input
+      id="volumeSlider"
+      class="slider"
+      type="range"
+      min="0"
+      max="800"
+      step="5"
+      value="100"
+    >
+
+    <div id="volumeWarning" class="volume-warning">
+      Warning: volumes above 600% may distort. Use at your own risk.
+    </div>
+
+    <div class="controls">
+      <button id="muteBtn" class="btn mute">Mute</button>
+    </div>
+
+    <div class="mode-buttons">
+      <button id="defaultBtn" class="btn mode-btn active">Default</button>
+      <button id="voiceBtn"   class="btn mode-btn">Voice boost</button>
+      <button id="bassBtn"    class="btn mode-btn">Bass boost</button>
+    </div>
+
+    <button id="resetBtn" class="btn reset">
+      Reset to 100% volume
+    </button>
+
+    <div class="tabs-section">
+      <div class="tabs-header">
+        <span class="tabs-title">Playing Tabs</span>
+        <span id="tabCount" class="tabs-count">0</span>
+      </div>
+      <div id="tabsList"></div>
+    </div>
+  </div>
+
+  <!-- Settings slide-over -->
+  <div id="settingsPanel" class="panel">
+    <div class="panel-header">
+      <span>Settings</span>
+      <button id="closePanel" class="close-button" title="Close">×</button>
+    </div>
+
+    <div class="panel-body">
+      <label>
+        <input type="checkbox" id="showBadge" checked>
+        Show badge count
+      </label>
+      <label>
+        <input type="checkbox" id="rememberVol" checked>
+        Remember volume per tab
+      </label>
+      <label>
+        <input type="checkbox" id="start100">
+        Always start at 100%
+      </label>
+      <label>
+        <input type="checkbox" id="overdrive" checked>
+        Experimental overdrive (up to 800%)
+      </label>
+
+      <div class="repo-link">
+        SoundSphere GitHub ·
+        <a href="https://github.com/ripDZL/SoundSphere"
+           target="_blank" rel="noopener noreferrer">
+          View source on GitHub
+        </a>
+      </div>
+    </div>
+
+    <div class="panel-footer">
+      <button id="savePanel">Save &amp; Close</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
