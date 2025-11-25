@@ -4,7 +4,7 @@
 
 # SoundSphere
 
-SoundSphere is a Firefox extension that lets you push quiet tabs louder, shape the sound, and quickly see which tabs are actually making noise.
+SoundSphere is a Firefox/Chrome extension that lets you push quiet tabs louder, shape the sound, and quickly see which tabs are actually making noise.
 
 - Per-tab or global volume control
 - Boost up to **800%**
