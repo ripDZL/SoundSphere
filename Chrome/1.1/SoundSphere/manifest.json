@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "SoundSphere",
+  "version": "1.1",
+  "description": "Smart volume boost and 10-band EQ for your browser audio. Boost, shape, and tame loudness without leaving the tab.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon/speaker16px.png",
+      "32": "icon/speaker32px.png",
+      "48": "icon/speaker48px.png",
+      "96": "icon/speaker96px.png",
+      "128": "icon/speaker128px.png"
+    }
+  },
+  "icons": {
+    "16": "icon/speaker16px.png",
+    "32": "icon/speaker32px.png",
+    "48": "icon/speaker48px.png",
+    "96": "icon/speaker96px.png",
+    "128": "icon/speaker128px.png"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting",
+    "tabCapture"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://music.youtube.com/*",
+    "*://*.bandcamp.com/*",
+    "*://*.soundcloud.com/*",
+    "*://open.spotify.com/*",
+    "*://music.amazon.com/*",
+    "*://*.twitch.tv/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://music.youtube.com/*",
+        "*://*.bandcamp.com/*",
+        "*://*.soundcloud.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/JetBrainsMono-ExtraBold.woff2"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
