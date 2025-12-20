@@ -28,8 +28,6 @@
   "permissions": [
     "storage",
     "tabs",
-    "activeTab",
-    "scripting",
     "tabCapture"
   ],
   "host_permissions": [
