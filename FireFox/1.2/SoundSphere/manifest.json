@@ -1,0 +1,61 @@
+{
+  "manifest_version": 2,
+  "name": "SoundSphere",
+  "version": "1.2",
+  "description": "Smart volume boost and 10-band EQ for your browser audio. Boost, shape, and tame loudness without leaving the tab.",
+  "icons": {
+    "16": "icon/speaker16px.png",
+    "32": "icon/speaker32px.png",
+    "48": "icon/speaker48px.png",
+    "96": "icon/speaker96px.png",
+    "128": "icon/speaker128px.png"
+  },
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon/speaker16px.png",
+      "32": "icon/speaker32px.png",
+      "48": "icon/speaker48px.png",
+      "96": "icon/speaker96px.png",
+      "128": "icon/speaker128px.png"
+    }
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "persistent": false
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "web_accessible_resources": [
+    "fonts/JetBrainsMono-ExtraBold.woff2",
+    "inject/webaudio_tap.js"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "applications": {
+    "gecko": {
+      "id": "soundsphere@dzl",
+      "strict_min_version": "109.0"
+    }
+  }
+}

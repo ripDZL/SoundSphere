@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SoundSphere</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="main">
+    <div class="header">
+      <h1>SoundSphere</h1>
+      <div class="header-buttons">
+        <button id="eqBtn" title="Equalizer" class="icon-button">
+          EQ
+        </button>
+        <button id="gearBtn" title="Settings" class="icon-button" aria-label="Settings">
+          <img src="icon/gear32px.png" width="20" height="20" alt="Settings">
+        </button>
+      </div>
+    </div>
+
+    <div id="siteNotice" class="site-notice hidden"></div>
+
+    <div class="volume-display">100%</div>
+
+    <input
+      id="volumeSlider"
+      class="slider"
+      type="range"
+      min="0"
+      max="800"
+      step="5"
+      value="100"
+    >
+
+    <div id="volumeWarning" class="volume-warning">
+      Warning: volumes above 600% may distort. Use at your own risk.
+    </div>
+
+    <div class="controls">
+      <button id="muteBtn" class="btn mute">Mute</button>
+    </div>
+
+    <div class="mode-buttons">
+      <button id="defaultBtn" class="btn mode-btn active">Default</button>
+      <button id="voiceBtn"   class="btn mode-btn">Voice boost</button>
+      <button id="bassBtn"    class="btn mode-btn">Bass boost</button>
+    </div>
+
+    <button id="resetBtn" class="btn reset">
+      Reset to 100% volume
+    </button>
+
+    <div class="tabs-section">
+      <div class="tabs-header">
+        <span class="tabs-title">Playing Tabs</span>
+        <span id="tabCount" class="tabs-count">0</span>
+      </div>
+      <div id="tabsList"></div>
+    </div>
+  </div>
+
+  <div id="settingsPanel" class="panel">
+    <div class="panel-header">
+      <span>Settings</span>
+      <button id="closePanel" class="close-button" title="Close">×</button>
+    </div>
+
+    <div class="panel-body">
+      <label>
+        <input type="checkbox" id="showBadge" checked>
+        Show badge count
+      </label>
+      <label>
+        <input type="checkbox" id="rememberVol" checked>
+        Remember volume per tab
+      </label>
+      <label>
+        <input type="checkbox" id="start100">
+        Always start at 100%
+      </label>
+      <label>
+        <input type="checkbox" id="overdrive" checked>
+        Experimental overdrive (up to 800%)
+      </label>
+
+      <div class="repo-link">
+        SoundSphere GitHub ·
+        <a href="https://github.com/ripDZL/SoundSphere"
+           target="_blank" rel="noopener noreferrer">
+          View source on GitHub
+        </a>
+      </div>
+    </div>
+
+    <div class="panel-footer">
+      <button id="savePanel">Save &amp; Close</button>
+    </div>
+  </div>
+
+  <div id="eqPanel" class="panel">
+    <div class="panel-header">
+      <span>Equalizer</span>
+      <button id="closeEqPanel" class="close-button" title="Close">×</button>
+    </div>
+
+    <div class="panel-body eq-panel-body">
+      <div class="eq-preset-row">
+        <span class="eq-preset-label">Preset:</span>
+        <select id="eqPresetSelect">
+          <option value="custom">Custom</option>
+          <option value="flat">Flat</option>
+          <option value="speech">Speech</option>
+          <option value="bassBoost">Bass boost</option>
+          <option value="trebleBoost">Treble boost</option>
+          <option value="vShape">V-shape</option>
+        </select>
+      </div>
+
+      <div class="eq-grid">
+        <div class="eq-band">
+          <span class="eq-label">31</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="0" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">62</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="1" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">125</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="2" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">250</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="3" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">500</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="4" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">1k</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="5" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">2k</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="6" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">4k</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="7" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">8k</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="8" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+        <div class="eq-band">
+          <span class="eq-label">16k</span>
+          <input type="range" min="-12" max="12" step="1" value="0"
+                 data-band="9" class="eq-slider">
+          <span class="eq-value">0 dB</span>
+        </div>
+      </div>
+
+      <div class="eq-footer-text">
+        Drag sliders to cut or boost each band (±12 dB).
+      </div>
+    </div>
+
+    <div class="panel-footer">
+      <button id="eqReset">Reset EQ</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
