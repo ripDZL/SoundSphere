@@ -25,14 +25,7 @@ function storageGet(defaults) {
 
 function storageSet(values) {
   return new Promise(resolve => {
-    chrome.storage.sync.set(values || {}, () => {
-      const err = chrome.runtime.lastError;
-      if (err && err.message) {
-        // Surfaces quota / write-rate failures that were previously silent.
-        console.debug("SoundSphere storage write issue:", err.message);
-      }
-      resolve();
-    });
+    chrome.storage.sync.set(values || {}, resolve);
   });
 }
 
@@ -263,10 +256,6 @@ let eqCustomGains = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 let lastSentVolume = null;
 
-// Loaded once at popup open; updated in memory and persisted on change.
-let hostVolumes = []; // MRU array of [host, percent]
-let globalVolume = 100; // fallback when "remember per site" is off
-
 const prefs = {
   showBadge: true,
   remember: true,
@@ -330,38 +319,8 @@ const EQ_PRESETS = {
 // Utilities
 // ---------------------------------------------------------------------
 
-// Per-site volumes live in a SINGLE sync key ("vol_hosts") as an MRU array:
-//   [[host, percent], ...]
-// This avoids the old `vol_tab_<id>` scheme, which created one key per tab,
-// never cleaned them up, and eventually hit chrome.storage.sync's 512-item
-// cap (after which all writes failed silently). Tab IDs are also ephemeral,
-// so per-tab memory never survived a restart anyway. Keying by host fixes
-// both: it's bounded, and "remember volume" now actually persists per site.
-const HOST_VOL_CAP = 200;        // hard ceiling on remembered sites
-const HOST_VOL_MAX_BYTES = 7000; // stay safely under sync's 8192 bytes/item
-
-function getHostVolume(list, host) {
-  if (!Array.isArray(list) || !host) return undefined;
-  const entry = list.find(e => Array.isArray(e) && e[0] === host);
-  return entry && typeof entry[1] === "number" ? entry[1] : undefined;
-}
-
-function setHostVolume(list, host, value) {
-  const arr = Array.isArray(list)
-    ? list.filter(e => Array.isArray(e) && e[0] !== host)
-    : [];
-  arr.unshift([host, value]);
-  if (arr.length > HOST_VOL_CAP) arr.length = HOST_VOL_CAP;
-  // Drop least-recently-set entries (from the tail) until the serialized map
-  // fits the per-item quota, so a write can never silently fail on overflow,
-  // regardless of hostname lengths. The just-set entry (front) is preserved.
-  while (
-    arr.length > 1 &&
-    new TextEncoder().encode(JSON.stringify(arr)).length > HOST_VOL_MAX_BYTES
-  ) {
-    arr.pop();
-  }
-  return arr;
+function keyForTab(tabId) {
+  return `vol_tab_${tabId}`;
 }
 
 /**
@@ -480,18 +439,6 @@ function setSlider(percentRaw) {
   slider.value = String(value);
   showDisplay(value);
   applyVolume(value);
-}
-
-// Saves the given volume for the current context: per-site when "remember"
-// is on (and we have a host), otherwise as the single global fallback.
-function persistVolume(value) {
-  if (prefs.remember && currentHost) {
-    hostVolumes = setHostVolume(hostVolumes, currentHost, value);
-    storageSet({ vol_hosts: hostVolumes });
-  } else {
-    globalVolume = value;
-    storageSet({ vol_global: value });
-  }
 }
 
 function setMode(mode) {
@@ -638,12 +585,8 @@ async function loadPrefsAndTab() {
     eqCustomGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     eqPreset: "flat",
     mode: "default",
-    vol_global: 100,
-    vol_hosts: []
+    vol_global: 100
   });
-
-  hostVolumes = Array.isArray(data.vol_hosts) ? data.vol_hosts : [];
-  globalVolume = typeof data.vol_global === "number" ? data.vol_global : 100;
 
   prefs.showBadge =
     data.showBadge !== undefined ? !!data.showBadge : prefs.showBadge;
@@ -745,14 +688,15 @@ async function loadPrefsAndTab() {
 
   let percent = 100;
   lastSentVolume = null;
+  const key = keyForTab(currentTabId);
 
-  const remembered = getHostVolume(hostVolumes, currentHost);
-  if (prefs.remember && typeof remembered === "number") {
-    percent = remembered;
-  } else if (!prefs.remember) {
-    percent = globalVolume;
+  if (prefs.remember && typeof data[key] === "number") {
+    percent = data[key];
+  } else if (!prefs.remember && typeof data.vol_global === "number") {
+    percent = data.vol_global;
+  } else if (prefs.start100) {
+    percent = 100;
   }
-  // Otherwise (remember on, no stored value, or start100) defaults to 100.
 
   setSlider(percent);
   sendEqToContent();
@@ -825,16 +769,17 @@ async function loadTabsList() {
       }
 
       let percent = 100;
-      const remembered = getHostVolume(hostVolumes, currentHost);
-      if (prefs.remember && typeof remembered === "number") {
-        percent = remembered;
-      } else if (!prefs.remember) {
-        percent = globalVolume;
+      const data = await storageGet({});
+      const key = keyForTab(currentTabId);
+
+      if (prefs.remember && typeof data[key] === "number") {
+        percent = data[key];
+      } else if (!prefs.remember && typeof data.vol_global === "number") {
+        percent = data.vol_global;
+      } else if (prefs.start100) {
+        percent = 100;
       }
 
-      // Reset the dedupe guard so the newly-focused tab actually receives its
-      // volume, even when it equals the previously-controlled tab's value.
-      lastSentVolume = null;
       setSlider(percent);
     });
   });
@@ -859,7 +804,14 @@ function initEvents() {
       const limit = maxVolume();
       let value = Number(slider.value) || 0;
       value = Math.max(0, Math.min(value, limit));
-      persistVolume(value);
+
+      const data = {};
+      if (prefs.remember && currentTabId) {
+        data[keyForTab(currentTabId)] = value;
+      } else {
+        data.vol_global = value;
+      }
+      storageSet(data);
     });
   }
 
@@ -869,7 +821,14 @@ function initEvents() {
       const newValue = isMuted ? 100 : 0;
 
       setSlider(newValue);
-      persistVolume(newValue);
+
+      const data = {};
+      if (prefs.remember && currentTabId) {
+        data[keyForTab(currentTabId)] = newValue;
+      } else {
+        data.vol_global = newValue;
+      }
+      storageSet(data);
 
       muteBtn.textContent = newValue === 0 ? "Unmute" : "Mute";
     });
@@ -878,7 +837,14 @@ function initEvents() {
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       setSlider(100);
-      persistVolume(100);
+
+      const data = {};
+      if (prefs.remember && currentTabId) {
+        data[keyForTab(currentTabId)] = 100;
+      } else {
+        data.vol_global = 100;
+      }
+      storageSet(data);
 
       if (muteBtn) muteBtn.textContent = "Mute";
     });

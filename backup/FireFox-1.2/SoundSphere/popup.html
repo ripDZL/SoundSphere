@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <title>SoundSphere</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -12,11 +14,13 @@
         <button id="eqBtn" title="Equalizer" class="icon-button">
           EQ
         </button>
-        <button id="gearBtn" title="Settings" class="icon-button">
+        <button id="gearBtn" title="Settings" class="icon-button" aria-label="Settings">
           <img src="icon/gear32px.png" width="20" height="20" alt="Settings">
         </button>
       </div>
     </div>
+
+    <div id="siteNotice" class="site-notice hidden"></div>
 
     <div class="volume-display">100%</div>
 
@@ -70,7 +74,7 @@
       </label>
       <label>
         <input type="checkbox" id="rememberVol" checked>
-        Remember volume per site
+        Remember volume per tab
       </label>
       <label>
         <input type="checkbox" id="start100">

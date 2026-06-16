@@ -1,17 +1,9 @@
-// SoundSphere popup
-//
-// This is the small UI you see when you click the extension icon.
-// It lets you:
-//   - boost or cut the volume for the current tab,
-//   - toggle mute / reset,
-//   - pick an EQ preset or shape a 10‑band EQ by hand,
-//   - switch between Default / Voice / Bass modes,
-//   - tweak a few quality‑of‑life options.
-//
-// The popup is short‑lived. It reads your saved settings, sends the new
-// values to the content script or engine tab, and then disappears when
-// you close it.
-//
+/*
+  SoundSphere — popup controller
+
+  The popup is short-lived. It loads preferences, reflects the current tab
+  state, and sends updates to the content script running in the active tab.
+*/
 
 // ---------------------------------------------------------------------
 // Small async helpers
@@ -25,14 +17,7 @@ function storageGet(defaults) {
 
 function storageSet(values) {
   return new Promise(resolve => {
-    chrome.storage.sync.set(values || {}, () => {
-      const err = chrome.runtime.lastError;
-      if (err && err.message) {
-        // Surfaces quota / write-rate failures that were previously silent.
-        console.debug("SoundSphere storage write issue:", err.message);
-      }
-      resolve();
-    });
+    chrome.storage.sync.set(values || {}, resolve);
   });
 }
 
@@ -73,143 +58,6 @@ function updateTab(tabId, info) {
 }
 
 // ---------------------------------------------------------------------
-// Tab-wide audio controller (tabCapture-based)
-// ---------------------------------------------------------------------
-//
-// Used on hosts where direct element control is unreliable or opaque
-// (Bandcamp, SoundCloud, Spotify Web, Amazon Music, Twitch, Jellyfin, etc.).
-// Instead of touching the page directly, we send high‑level instructions
-// to the pinned engine tab and let it handle tabCapture + WebAudio.
-//
-// This client only worries about:
-//   - making sure the engine tab exists
-//   - routing messages by tabId
-//   - keeping track of which tab the popup is currently controlling
-class TabAudioController {
-  constructor() {
-    this.engineUrl = chrome.runtime.getURL("engine.html");
-    this.engineReady = false;
-    this.engineTabId = null;
-    this._ensurePromise = null;
-  }
-
-  async ensureEngineTab() {
-    // Ensure the engine tab exists, but avoid creating duplicates if multiple
-    // calls race each other.
-    if (this.engineReady && this.engineTabId != null) return;
-
-    if (this._ensurePromise) {
-      return this._ensurePromise;
-    }
-
-    this._ensurePromise = (async () => {
-      const tabs = await queryTabs({ url: this.engineUrl });
-      if (tabs && tabs.length) {
-        this.engineReady = true;
-        this.engineTabId = tabs[0].id;
-        this._ensurePromise = null;
-        return;
-      }
-
-      await new Promise(resolve => {
-        chrome.tabs.create(
-          {
-            url: this.engineUrl,
-            pinned: true,
-            active: false
-          },
-          tab => {
-            if (tab && typeof tab.id === "number") {
-              this.engineTabId = tab.id;
-            }
-            resolve();
-          }
-        );
-      });
-
-      this.engineReady = true;
-      this._ensurePromise = null;
-    })();
-
-    return this._ensurePromise;
-  }
-
-  async sendToEngine(message) {
-    try {
-      await this.ensureEngineTab();
-    } catch (error) {
-      // In the release build we keep this quiet. If the engine tab cannot
-      // be created, the controls simply have no effect on that site.
-      return null;
-    }
-
-    return new Promise(resolve => {
-      chrome.runtime.sendMessage(
-        Object.assign({ target: "engine" }, message),
-        response => {
-          const err = chrome.runtime.lastError;
-          if (err && err.message) {
-            const msg = err.message;
-            const benign =
-              msg.includes("Receiving end does not exist") ||
-              msg.includes("The message port closed") ||
-              msg.includes("No matching message handler");
-
-            if (!benign) {
-              // For debugging you can temporarily enable:
-              // console.debug("SoundSphere engine message issue:", msg);
-            }
-          }
-          resolve(response || null);
-        }
-      );
-    });
-  }
-
-  async setGainPercent(tabId, percent) {
-    const id =
-      typeof tabId === "number" ? tabId : typeof currentTabId === "number" ? currentTabId : null;
-    if (id == null) return;
-    await this.sendToEngine({
-      type: "SET_GAIN",
-      tabId: id,
-      volume: percent
-    });
-  }
-
-  async setEqGains(gains) {
-    const id = typeof currentTabId === "number" ? currentTabId : null;
-    if (id == null) return;
-    await this.sendToEngine({
-      type: "SET_EQ",
-      tabId: id,
-      gains
-    });
-  }
-
-  async setMode(mode) {
-    const id = typeof currentTabId === "number" ? currentTabId : null;
-    if (id == null) return;
-    await this.sendToEngine({
-      type: "SET_MODE",
-      tabId: id,
-      mode
-    });
-  }
-
-  async dispose() {
-    const id = typeof currentTabId === "number" ? currentTabId : null;
-    await this.sendToEngine({
-      type: "DISPOSE",
-      tabId: id
-    });
-  }
-}
-
-const tabAudioController = new TabAudioController();
-
-
-// ---------------------------------------------------------------------
 // DOM elements
 // ---------------------------------------------------------------------
 
@@ -222,6 +70,7 @@ const resetBtn = document.getElementById("resetBtn");
 const defaultBtn = document.getElementById("defaultBtn");
 const voiceBtn = document.getElementById("voiceBtn");
 const bassBtn = document.getElementById("bassBtn");
+const siteNotice = document.getElementById("siteNotice");
 
 const tabsList = document.getElementById("tabsList");
 const tabCount = document.getElementById("tabCount");
@@ -256,16 +105,19 @@ const eqPresetSelect = document.getElementById("eqPresetSelect");
 let currentTabId = null;
 let currentMode = "default";
 let currentHost = "";
-let isTabCaptureSite = false;
+
+// Whether the current page has an active WebAudio hook (content script)
+// that can support >100% boost and EQ.
+let pageCanBoost = false;
+
+// Whether advanced DSP controls (EQ / modes / overdrive) are enabled for the current site.
+let effectsEnabled = true;
+let effectsBlockReason = "";
 
 let eqGains = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 let eqCustomGains = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 let lastSentVolume = null;
-
-// Loaded once at popup open; updated in memory and persisted on change.
-let hostVolumes = []; // MRU array of [host, percent]
-let globalVolume = 100; // fallback when "remember per site" is off
 
 const prefs = {
   showBadge: true,
@@ -325,88 +177,69 @@ const EQ_PRESETS = {
   vShape: [6, 4, 2, 0, -4, -4, 0, 2, 4, 6]
 };
 
-
 // ---------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------
 
-// Per-site volumes live in a SINGLE sync key ("vol_hosts") as an MRU array:
-//   [[host, percent], ...]
-// This avoids the old `vol_tab_<id>` scheme, which created one key per tab,
-// never cleaned them up, and eventually hit chrome.storage.sync's 512-item
-// cap (after which all writes failed silently). Tab IDs are also ephemeral,
-// so per-tab memory never survived a restart anyway. Keying by host fixes
-// both: it's bounded, and "remember volume" now actually persists per site.
-const HOST_VOL_CAP = 200;        // hard ceiling on remembered sites
-const HOST_VOL_MAX_BYTES = 7000; // stay safely under sync's 8192 bytes/item
-
-function getHostVolume(list, host) {
-  if (!Array.isArray(list) || !host) return undefined;
-  const entry = list.find(e => Array.isArray(e) && e[0] === host);
-  return entry && typeof entry[1] === "number" ? entry[1] : undefined;
-}
-
-function setHostVolume(list, host, value) {
-  const arr = Array.isArray(list)
-    ? list.filter(e => Array.isArray(e) && e[0] !== host)
-    : [];
-  arr.unshift([host, value]);
-  if (arr.length > HOST_VOL_CAP) arr.length = HOST_VOL_CAP;
-  // Drop least-recently-set entries (from the tail) until the serialized map
-  // fits the per-item quota, so a write can never silently fail on overflow,
-  // regardless of hostname lengths. The just-set entry (front) is preserved.
-  while (
-    arr.length > 1 &&
-    new TextEncoder().encode(JSON.stringify(arr)).length > HOST_VOL_MAX_BYTES
-  ) {
-    arr.pop();
-  }
-  return arr;
-}
-
-/**
- * Decide whether a given URL should use the tabCapture audio path.
- * This covers:
- * - Bandcamp / SoundCloud
- * - Spotify Web
- * - Amazon Music
- * - Twitch
- * - Jellyfin (by hostname or common ports 8096 / 8920 with /web path)
- */
-function isTabCaptureUrl(url) {
-  if (!url) return false;
-
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
-  const host = (parsed.hostname || "").toLowerCase();
-  const path = (parsed.pathname || "").toLowerCase();
-  const port = parsed.port || "";
-
-  if (host.endsWith("bandcamp.com")) return true;
-  if (host.endsWith("soundcloud.com")) return true;
-  if (host === "open.spotify.com") return true;
-  if (host === "music.amazon.com" || host.endsWith(".music.amazon.com"))
-    return true;
-  if (host === "www.twitch.tv" || host.endsWith(".twitch.tv")) return true;
-
-  // Jellyfin: hostname contains "jellyfin" (e.g. jellyfin.local, jellyfin.domain)
-  if (host.includes("jellyfin")) return true;
-
-  // Jellyfin common ports with /web UI (e.g. http://192.168.x.x:8096/web)
-  if ((port === "8096" || port === "8920") && path.startsWith("/web")) {
-    return true;
-  }
-
-  return false;
+function keyForTab(tabId) {
+  return `vol_tab_${tabId}`;
 }
 
 function maxVolume() {
+  // Firefox build: we allow >100% only when the content script reports
+  // that it is successfully processing audio via WebAudio.
+  if (!pageCanBoost) return 100;
   return prefs.overdrive ? 800 : 600;
+}
+
+function setSiteNotice(text) {
+  if (!siteNotice) return;
+
+  const msg = (text || "").trim();
+  if (!msg) {
+    siteNotice.textContent = "";
+    siteNotice.classList.add("hidden");
+    return;
+  }
+
+  siteNotice.textContent = msg;
+  siteNotice.classList.remove("hidden");
+}
+
+function setEffectsEnabledForPage(enabled, reason) {
+  effectsEnabled = !!enabled;
+  effectsBlockReason = reason || "";
+
+  if (!effectsEnabled) {
+    // Force basic mode in UI.
+    pageCanBoost = false;
+  }
+
+  // Mode buttons and EQ controls.
+  const disable = !effectsEnabled;
+
+  try { if (eqBtn) eqBtn.disabled = disable; } catch {}
+  try { if (defaultBtn) defaultBtn.disabled = disable; } catch {}
+  try { if (voiceBtn) voiceBtn.disabled = disable; } catch {}
+  try { if (bassBtn) bassBtn.disabled = disable; } catch {}
+  try { if (eqPresetSelect) eqPresetSelect.disabled = disable; } catch {}
+
+  for (const el of eqInputs) {
+    try { el.disabled = disable; } catch {}
+  }
+
+  // If we just disabled, close any open EQ panel to avoid confusion.
+  if (disable && eqPanel) {
+    try { eqPanel.classList.remove("open"); } catch {}
+  }
+
+  document.body.classList.toggle("effects-disabled", disable);
+
+  if (disable) {
+    setSiteNotice(effectsBlockReason);
+  } else {
+    setSiteNotice("");
+  }
 }
 
 function showWarning(percent) {
@@ -459,15 +292,7 @@ function applyVolume(percentRaw) {
     return;
   }
   lastSentVolume = value;
-
-  if (isTabCaptureSite && tabAudioController && currentTabId != null) {
-    tabAudioController.setGainPercent(currentTabId, value);
-    sendToTab({ action: "setVolume", volume: value, via: "tabCapture" });
-  }
-
-  else {
-    sendToTab({ action: "setVolume", volume: value });
-  }
+  sendToTab({ action: "setVolume", volume: value });
 }
 
 function setSlider(percentRaw) {
@@ -482,18 +307,6 @@ function setSlider(percentRaw) {
   applyVolume(value);
 }
 
-// Saves the given volume for the current context: per-site when "remember"
-// is on (and we have a host), otherwise as the single global fallback.
-function persistVolume(value) {
-  if (prefs.remember && currentHost) {
-    hostVolumes = setHostVolume(hostVolumes, currentHost, value);
-    storageSet({ vol_hosts: hostVolumes });
-  } else {
-    globalVolume = value;
-    storageSet({ vol_global: value });
-  }
-}
-
 function setMode(mode) {
   currentMode = mode;
 
@@ -506,11 +319,9 @@ function setMode(mode) {
   if (mode === "voice" && voiceBtn) voiceBtn.classList.add("active");
   if (mode === "bass" && bassBtn) bassBtn.classList.add("active");
 
-  sendToTab({ action: "setMode", mode });
-  storageSet({ mode });
-
-  if (isTabCaptureSite && tabAudioController) {
-    tabAudioController.setMode(mode);
+  if (effectsEnabled) {
+    sendToTab({ action: "setMode", mode });
+    storageSet({ mode });
   }
 }
 
@@ -539,11 +350,8 @@ function applyEqToUi() {
 }
 
 function sendEqToContent() {
+  if (!effectsEnabled) return;
   sendToTab({ action: "setEqGains", gains: eqGains });
-
-  if (isTabCaptureSite && tabAudioController) {
-    tabAudioController.setEqGains(eqGains);
-  }
 }
 
 function setPresetValue(name) {
@@ -638,12 +446,8 @@ async function loadPrefsAndTab() {
     eqCustomGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     eqPreset: "flat",
     mode: "default",
-    vol_global: 100,
-    vol_hosts: []
+    vol_global: 100
   });
-
-  hostVolumes = Array.isArray(data.vol_hosts) ? data.vol_hosts : [];
-  globalVolume = typeof data.vol_global === "number" ? data.vol_global : 100;
 
   prefs.showBadge =
     data.showBadge !== undefined ? !!data.showBadge : prefs.showBadge;
@@ -702,16 +506,8 @@ async function loadPrefsAndTab() {
     host = "";
   }
   currentHost = host;
-  isTabCaptureSite = isTabCaptureUrl(url);
 
-  if (!isTabCaptureSite && tabAudioController) {
-    // Engine now runs in its own tab; do not auto-dispose here.
-  }
-
-  if (isTabCaptureSite && tabAudioController) {
-    tabAudioController.setMode(currentMode);
-    tabAudioController.setEqGains(eqGains);
-  }
+  const isSpotifyHost = (currentHost === 'open.spotify.com') || currentHost === 'spotify.com' || currentHost.endsWith('.spotify.com');
 
   let state = null;
   try {
@@ -721,6 +517,25 @@ async function loadPrefsAndTab() {
   }
 
   if (state && typeof state.volume === "number") {
+    pageCanBoost = !!state.canBoost;
+    // Capability gating (notably Spotify protected playback).
+    if (state.blockedEffects) {
+      setEffectsEnabledForPage(false, state.blockReason || "Advanced processing is unavailable on this page.");
+    } else if (isSpotifyHost && !state.canBoost) {
+      const drmDetected = !!state.drm;
+      const sig = state.drmSignals || null;
+      const sawSignal = !!(sig && (sig.encryptedEvent || sig.mediaKeys));
+      const drmStatus = drmDetected || sawSignal
+        ? "DRM status: detected."
+        : "DRM status: not observed yet.";
+      const msg = drmDetected
+        ? `Spotify is using protected playback (DRM/Widevine) in this browser session. ${drmStatus} SoundSphere will run in Basic mode: mute and 0–100% volume only.`
+        : `Advanced processing is unavailable for Spotify in this browser session. Spotify Web often uses protected playback (DRM/Widevine), which blocks EQ and overdrive in Firefox-family browsers. ${drmStatus} SoundSphere will run in Basic mode: mute and 0–100% volume only.`;
+      setEffectsEnabledForPage(false, msg);
+    } else {
+      setEffectsEnabledForPage(true, "");
+    }
+
     const limit = maxVolume();
     const vol = Math.max(0, Math.min(state.volume, limit));
     setSlider(vol);
@@ -745,14 +560,23 @@ async function loadPrefsAndTab() {
 
   let percent = 100;
   lastSentVolume = null;
+  const key = keyForTab(currentTabId);
 
-  const remembered = getHostVolume(hostVolumes, currentHost);
-  if (prefs.remember && typeof remembered === "number") {
-    percent = remembered;
-  } else if (!prefs.remember) {
-    percent = globalVolume;
+  // If the content script isn't responding yet, assume no WebAudio hook.
+  pageCanBoost = false;
+  if (isSpotifyHost) {
+    setEffectsEnabledForPage(false, "Spotify advanced processing status is unavailable right now. If this browser session uses protected playback (DRM/Widevine), EQ and overdrive are blocked. SoundSphere will run in Basic mode: mute and 0–100% volume only.");
+  } else {
+    setEffectsEnabledForPage(true, "");
   }
-  // Otherwise (remember on, no stored value, or start100) defaults to 100.
+
+  if (prefs.remember && typeof data[key] === "number") {
+    percent = data[key];
+  } else if (!prefs.remember && typeof data.vol_global === "number") {
+    percent = data.vol_global;
+  } else if (prefs.start100) {
+    percent = 100;
+  }
 
   setSlider(percent);
   sendEqToContent();
@@ -765,79 +589,74 @@ async function loadPrefsAndTab() {
 async function loadTabsList() {
   if (!tabsList || !tabCount) return;
 
-  const tabs = await queryTabs({ audible: true });
-  const list = tabs || [];
-
+  const list = (await queryTabs({ audible: true })) || [];
   tabCount.textContent = String(list.length);
 
+  // Clear existing rows
+  while (tabsList.firstChild) tabsList.removeChild(tabsList.firstChild);
+
   if (list.length === 0) {
-    tabsList.innerHTML =
-      '<div class="no-tabs">No tabs playing audio right now</div>';
+    const empty = document.createElement("div");
+    empty.className = "no-tabs";
+    empty.textContent = "No tabs playing audio right now";
+    tabsList.appendChild(empty);
     return;
   }
 
-  const html = list
-    .map(tab => {
-      const title = tab.title || "Audio tab";
-      const short = title.length > 40 ? `${title.slice(0, 40)}…` : title;
-      const active = tab.active ? "active" : "";
-      const icon = tab.favIconUrl
-        ? `<img src="${tab.favIconUrl}" class="tab-icon" alt="">`
-        : "";
+  for (const tab of list) {
+    const title = tab.title || "Audio tab";
+    const short = title.length > 40 ? `${title.slice(0, 40)}…` : title;
 
-      return `
-        <button class="tab-row ${active}" data-tab-id="${tab.id}">
-          ${icon}
-          <span class="tab-title">${short}</span>
-        </button>
-      `;
-    })
-    .join("");
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `tab-row${tab.active ? " active" : ""}`;
+    row.dataset.tabId = String(tab.id || "");
+    row.title = title;
 
-  tabsList.innerHTML = html;
+    if (tab.favIconUrl) {
+      const icon = document.createElement("img");
+      icon.className = "tab-icon";
+      icon.alt = "";
+      icon.src = tab.favIconUrl;
+      row.appendChild(icon);
+    }
 
-  tabsList.querySelectorAll(".tab-row").forEach(row => {
+    const name = document.createElement("span");
+    name.className = "tab-title";
+    name.textContent = short;
+    row.appendChild(name);
+
+    const url = tab.url || "";
+    let domain = "";
+    try {
+      domain = url ? new URL(url).hostname : "";
+    } catch {}
+    if (domain) {
+      const host = document.createElement("span");
+      host.className = "tab-domain";
+      host.textContent = domain;
+      row.appendChild(host);
+    }
+
+    const vol = document.createElement("span");
+    vol.className = "tab-vol";
+    vol.textContent = `${Math.round(getSlider())}%`;
+    row.appendChild(vol);
+
     row.addEventListener("click", async () => {
       const id = Number(row.dataset.tabId);
       if (!id) return;
 
-      await updateTab(id, { active: true });
-      currentTabId = id;
+      await updateTargetTab(id);
 
-      const [tab] = await queryTabs({ active: true, currentWindow: true });
-      if (tab) {
-        const url = tab.url || "";
-        let host = "";
-        try {
-          host = new URL(url).hostname || "";
-        } catch {
-          host = "";
-        }
-        currentHost = host;
-        isTabCaptureSite = isTabCaptureUrl(url);
-
-        if (!isTabCaptureSite) {
-          // Engine lives in a dedicated tab; avoid auto-dispose on non-capture sites.
-        } else {
-          tabAudioController.setMode(currentMode);
-          tabAudioController.setEqGains(eqGains);
-        }
-      }
-
-      let percent = 100;
-      const remembered = getHostVolume(hostVolumes, currentHost);
-      if (prefs.remember && typeof remembered === "number") {
-        percent = remembered;
-      } else if (!prefs.remember) {
-        percent = globalVolume;
-      }
-
-      // Reset the dedupe guard so the newly-focused tab actually receives its
-      // volume, even when it equals the previously-controlled tab's value.
-      lastSentVolume = null;
-      setSlider(percent);
+      // After targeting a different tab, refresh the popup state so sliders
+      // and labels reflect the newly selected page.
+      await refresh();
+      await loadTabsList();
     });
-  });
+
+    tabsList.appendChild(row);
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -859,7 +678,14 @@ function initEvents() {
       const limit = maxVolume();
       let value = Number(slider.value) || 0;
       value = Math.max(0, Math.min(value, limit));
-      persistVolume(value);
+
+      const data = {};
+      if (prefs.remember && currentTabId) {
+        data[keyForTab(currentTabId)] = value;
+      } else {
+        data.vol_global = value;
+      }
+      storageSet(data);
     });
   }
 
@@ -869,7 +695,14 @@ function initEvents() {
       const newValue = isMuted ? 100 : 0;
 
       setSlider(newValue);
-      persistVolume(newValue);
+
+      const data = {};
+      if (prefs.remember && currentTabId) {
+        data[keyForTab(currentTabId)] = newValue;
+      } else {
+        data.vol_global = newValue;
+      }
+      storageSet(data);
 
       muteBtn.textContent = newValue === 0 ? "Unmute" : "Mute";
     });
@@ -878,7 +711,14 @@ function initEvents() {
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       setSlider(100);
-      persistVolume(100);
+
+      const data = {};
+      if (prefs.remember && currentTabId) {
+        data[keyForTab(currentTabId)] = 100;
+      } else {
+        data.vol_global = 100;
+      }
+      storageSet(data);
 
       if (muteBtn) muteBtn.textContent = "Mute";
     });
@@ -1005,9 +845,4 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(() => {
     loadTabsList().catch(() => {});
   }, 3000);
-});
-
-window.addEventListener("unload", () => {
-  // Do not dispose the engine when the popup closes.
-  // The pinned engine tab keeps audio processing persistent.
 });

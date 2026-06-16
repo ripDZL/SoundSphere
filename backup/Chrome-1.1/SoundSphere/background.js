@@ -29,25 +29,6 @@ function loadBadgePreference() {
   });
 }
 
-// One-time cleanup: older builds wrote a `vol_tab_<id>` key per tab and never
-// removed them, which could exhaust chrome.storage.sync's 512-item quota and
-// make all settings writes fail silently. We drop those orphaned keys here.
-function purgeLegacyTabVolumeKeys() {
-  chrome.storage.sync.get(null, all => {
-    if (chrome.runtime.lastError || !all) return;
-    const stale = Object.keys(all).filter(key => key.startsWith("vol_tab_"));
-    if (stale.length) {
-      chrome.storage.sync.remove(stale, () => void chrome.runtime.lastError);
-    }
-  });
-}
-
-chrome.runtime.onInstalled.addListener(details => {
-  if (details.reason === "install" || details.reason === "update") {
-    purgeLegacyTabVolumeKeys();
-  }
-});
-
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if ("audible" in changeInfo) {
     refreshAudibleTabs();
