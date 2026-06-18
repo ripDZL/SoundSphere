@@ -257,6 +257,12 @@ let currentTabId = null;
 let currentMode = "default";
 let currentHost = "";
 let captureStarted = false; // offscreen tabCapture engaged for the current tab
+let captureRetries = 0;
+const MAX_CAPTURE_RETRIES = 2;
+
+function ssLog(...args) {
+  console.log("[SS popup]", ...args);
+}
 
 let eqGains = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 let eqCustomGains = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -457,17 +463,29 @@ function applyEngineVolume(value) {
   if (currentTabId == null) return;
   if (!captureStarted) {
     captureStarted = true;
+    ssLog("requesting capture: tab", currentTabId, "vol", value);
     chrome.runtime.sendMessage(
       { type: "ss-start-capture", tabId: currentTabId, volume: value,
         mode: currentMode, gains: eqGains },
       resp => {
-        if (chrome.runtime.lastError || !resp || !resp.ok) {
-          captureStarted = false; // allow retry on next change
-          console.debug(
-            "SoundSphere capture start failed:",
-            (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-              (resp && resp.error)
-          );
+        const err = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+          (resp && resp.error);
+        if (err || !resp || !resp.ok) {
+          captureStarted = false; // re-arm so the next attempt can start
+          ssLog("capture FAILED:", err);
+          if (captureRetries < MAX_CAPTURE_RETRIES) {
+            captureRetries++;
+            ssLog("auto-retry " + captureRetries + " in 400ms");
+            setTimeout(() => {
+              const v = Number(slider && slider.value) || value;
+              applyEngineVolume(v);
+            }, 400);
+          } else {
+            ssLog("capture gave up after " + MAX_CAPTURE_RETRIES + " retries");
+          }
+        } else {
+          ssLog("capture OK: tab", currentTabId);
+          captureRetries = 0;
         }
       }
     );
@@ -715,6 +733,8 @@ async function loadPrefsAndTab() {
   }
   currentHost = host;
   captureStarted = false;
+  captureRetries = 0;
+  ssLog("tab resolved:", currentTabId, currentHost || "(no host)");
   // Path B: all sites use the offscreen engine; mode/EQ ride along in the
   // capture start payload, so there is no per-load engine push here.
 
@@ -820,6 +840,7 @@ async function loadTabsList() {
         }
         currentHost = host;
         captureStarted = false;
+        captureRetries = 0;
       }
 
       let percent = 100;
@@ -994,10 +1015,12 @@ function initEvents() {
 // ---------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
+  ssLog("popup DOMContentLoaded: initializing");
   ensurePresetOptions();
   initEvents();
-  loadPrefsAndTab().catch(() => {});
-  loadTabsList().catch(() => {});
+  ssLog("popup UI events bound");
+  loadPrefsAndTab().catch(e => ssLog("loadPrefsAndTab ERROR:", e && e.message));
+  loadTabsList().catch(e => ssLog("loadTabsList ERROR:", e && e.message));
 
   // Poll audible tabs while popup is open (popup dies when closed).
   setInterval(() => {

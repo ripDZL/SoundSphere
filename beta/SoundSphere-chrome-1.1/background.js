@@ -76,23 +76,73 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // actual audio capture + gain. Only one offscreen document may exist.
 // ---------------------------------------------------------------------------
 
+function ssLog(...args) {
+  console.log("[SS bg]", ...args);
+}
+
+ssLog("service worker started");
+
+// Serialize offscreen creation and tolerate the "already exists" race.
+let offscreenCreating = null;
 async function ensureOffscreen() {
-  const has = await chrome.offscreen.hasDocument();
-  if (has) return;
-  await chrome.offscreen.createDocument({
-    url: "offscreen.html",
-    reasons: ["USER_MEDIA"],
-    justification: "Boost and adjust the volume of captured tab audio."
-  });
+  if (await chrome.offscreen.hasDocument()) {
+    return;
+  }
+  if (!offscreenCreating) {
+    ssLog("offscreen: creating document");
+    offscreenCreating = chrome.offscreen
+      .createDocument({
+        url: "offscreen.html",
+        reasons: ["USER_MEDIA"],
+        justification: "Boost and adjust the volume of captured tab audio."
+      })
+      .then(() => ssLog("offscreen: document created"))
+      .catch(e => {
+        // A concurrent createDocument may have already made it.
+        if (String((e && e.message) || e).includes("single offscreen")) {
+          ssLog("offscreen: already created by a concurrent call");
+          return;
+        }
+        throw e;
+      })
+      .finally(() => { offscreenCreating = null; });
+  }
+  return offscreenCreating;
+}
+
+// Send to the offscreen doc, retrying once if it isn't listening yet
+// (covers the createDocument-resolved-but-listener-not-ready race).
+async function sendToOffscreen(message, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (e) {
+      ssLog("offscreen send failed (attempt " + attempt + "):", e && e.message);
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 200));
+        await ensureOffscreen();
+      } else {
+        throw e;
+      }
+    }
+  }
 }
 
 async function startCaptureForTab(tabId, volume, mode, gains) {
+  ssLog("startCapture requested: tab", tabId, "vol", volume, "mode", mode);
   await ensureOffscreen();
-  // getMediaStreamId requires that the extension was invoked on the tab
-  // (opening the popup counts), and works without broad host permissions.
-  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+
+  let streamId;
+  try {
+    streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  } catch (e) {
+    ssLog("getMediaStreamId FAILED:", e && e.message);
+    throw e;
+  }
+  ssLog("getMediaStreamId ok for tab", tabId);
+
   activeCaptureTabId = tabId;
-  return chrome.runtime.sendMessage({
+  const resp = await sendToOffscreen({
     target: "offscreen",
     type: "start",
     streamId,
@@ -101,10 +151,17 @@ async function startCaptureForTab(tabId, volume, mode, gains) {
     mode,
     gains
   });
+  if (!resp || !resp.ok) {
+    activeCaptureTabId = null;
+    throw new Error((resp && resp.error) || "offscreen reported start failure");
+  }
+  ssLog("startCapture SUCCESS: tab", tabId);
+  return resp;
 }
 
 function stopCapture() {
   if (activeCaptureTabId === null) return;
+  ssLog("stopCapture: releasing tab", activeCaptureTabId);
   activeCaptureTabId = null;
   // No receiver (offscreen already gone) is fine — swallow the rejection.
   chrome.runtime.sendMessage({ target: "offscreen", type: "stop" }).catch(() => {});

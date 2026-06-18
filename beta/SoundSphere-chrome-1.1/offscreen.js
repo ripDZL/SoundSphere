@@ -90,6 +90,7 @@ function setVolume(percent) {
 }
 
 async function start(streamId, tabId, volumePercent, mode, gains) {
+  log("start received: tab", tabId, "vol", volumePercent, "mode", mode);
   teardown();
 
   if (typeof mode === "string") currentMode = mode;
@@ -108,8 +109,9 @@ async function start(streamId, tabId, volumePercent, mode, gains) {
       },
       video: false
     });
+    log("getUserMedia ok: capture stream acquired");
   } catch (e) {
-    log("getUserMedia failed:", e && e.message);
+    log("getUserMedia FAILED:", e && e.message);
     teardown();
     throw e;
   }
@@ -131,6 +133,7 @@ async function start(streamId, tabId, volumePercent, mode, gains) {
   });
   last.connect(compressor);
   compressor.connect(ctx.destination);
+  log("graph built (gain -> mode -> 10-band EQ -> compressor)");
 
   capturedTabId = tabId;
   applyMode();
@@ -138,9 +141,9 @@ async function start(streamId, tabId, volumePercent, mode, gains) {
   setVolume(volumePercent);
 
   if (ctx.state === "suspended") {
-    try { await ctx.resume(); } catch (e) {}
+    try { await ctx.resume(); log("context resumed"); } catch (e) { log("resume failed:", e && e.message); }
   }
-  log("capturing tab", tabId, "@", volumePercent + "%", "mode", currentMode);
+  log("HOOKED: capturing tab", tabId, "@", volumePercent + "%", "state", ctx.state);
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -187,3 +190,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 });
+
+log("offscreen loaded, message listener registered");
