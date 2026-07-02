@@ -323,6 +323,13 @@ function applyVolume(percentRaw) {
   sendToTab({ action: "setVolume", volume: value });
 }
 
+function updateSliderFill(value, limit) {
+  if (!slider) return;
+  const pct = (value / (limit || 800)) * 100;
+  slider.style.background =
+    `linear-gradient(to right, var(--accent) 0%, var(--accent) ${pct}%, var(--surface-2) ${pct}%)`;
+}
+
 function setSlider(percentRaw) {
   if (!slider) return;
 
@@ -331,6 +338,7 @@ function setSlider(percentRaw) {
 
   slider.max = String(limit);
   slider.value = String(value);
+  updateSliderFill(value, limit);
   showDisplay(value);
   applyVolume(value);
 }
@@ -721,6 +729,7 @@ function initEvents() {
       let value = Number(slider.value) || 0;
       value = Math.max(0, Math.min(value, limit));
       slider.value = String(value);
+      updateSliderFill(value, limit);
       showDisplay(value);
       applyVolume(value);
     });

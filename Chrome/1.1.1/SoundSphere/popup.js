@@ -519,8 +519,16 @@ function setSlider(percentRaw) {
 
   slider.max = String(limit);
   slider.value = String(value);
+  updateSliderFill(value, limit);
   showDisplay(value);
   applyVolume(value);
+}
+
+function updateSliderFill(value, limit) {
+  if (!slider) return;
+  const pct = (value / (limit || 800)) * 100;
+  slider.style.background =
+    `linear-gradient(to right, var(--accent) 0%, var(--accent) ${pct}%, var(--surface-2) ${pct}%)`;
 }
 
 // Saves the given volume for the current context: per-site when "remember"
@@ -812,25 +820,30 @@ async function loadTabsList() {
     return;
   }
 
-  const html = list
-    .map(tab => {
-      const title = tab.title || "Audio tab";
-      const short = title.length > 40 ? `${title.slice(0, 40)}…` : title;
-      const active = tab.active ? "active" : "";
-      const icon = tab.favIconUrl
-        ? `<img src="${tab.favIconUrl}" class="tab-icon" alt="">`
-        : "";
+  tabsList.textContent = "";
+  list.forEach(tab => {
+    const title = tab.title || "Audio tab";
+    const short = title.length > 40 ? `${title.slice(0, 40)}…` : title;
 
-      return `
-        <button class="tab-row ${active}" data-tab-id="${tab.id}">
-          ${icon}
-          <span class="tab-title">${short}</span>
-        </button>
-      `;
-    })
-    .join("");
+    const btn = document.createElement("button");
+    btn.className = "tab-row" + (tab.active ? " active" : "");
+    btn.dataset.tabId = String(tab.id);
 
-  tabsList.innerHTML = html;
+    if (tab.favIconUrl) {
+      const img = document.createElement("img");
+      img.src = tab.favIconUrl;
+      img.className = "tab-icon";
+      img.alt = "";
+      btn.appendChild(img);
+    }
+
+    const span = document.createElement("span");
+    span.className = "tab-title";
+    span.textContent = short;
+    btn.appendChild(span);
+
+    tabsList.appendChild(btn);
+  });
 
   tabsList.querySelectorAll(".tab-row").forEach(row => {
     row.addEventListener("click", async () => {
@@ -882,6 +895,7 @@ function initEvents() {
       value = Math.max(0, Math.min(value, limit));
       slider.value = String(value);
       slider.setAttribute("aria-valuetext", value + "%");
+      updateSliderFill(value, Number(slider.max) || 800);
       showDisplay(value);
       applyVolume(value);
     });
