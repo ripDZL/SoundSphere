@@ -76,3 +76,21 @@
 
   loadPrefs();
 })();
+
+// One-time cleanup: older builds wrote per-tab `vol_tab_<id>` keys and never
+// removed them, which could exhaust storage.sync's 512-item quota.
+function purgeLegacyTabVolumeKeys() {
+  chrome.storage.sync.get(null, all => {
+    if (chrome.runtime.lastError || !all) return;
+    const stale = Object.keys(all).filter(k => k.startsWith("vol_tab_"));
+    if (stale.length) {
+      chrome.storage.sync.remove(stale, () => void chrome.runtime.lastError);
+    }
+  });
+}
+
+chrome.runtime.onInstalled.addListener(details => {
+  if (details.reason === "install" || details.reason === "update") {
+    purgeLegacyTabVolumeKeys();
+  }
+});

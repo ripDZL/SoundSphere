@@ -14,7 +14,7 @@
     showBadge: true,
     rememberVolume: true,
     startAt100: false,
-    overdrive: false,
+    overdrive: true,
     spotifyExperimental: false
   };
 

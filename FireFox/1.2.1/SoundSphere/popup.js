@@ -163,9 +163,6 @@ const EQ_PRESETS = {
   // Strong low cut, reduced mud, boosted presence, slightly tamed air.
   liveClean: [-12, -8, -4, -2, 0, 2, 4, 4, 2, -2],
 
-  // Additional presets mapped to UI labels
-  // Speech: presence boost, reduced rumble
-  speech: [-6, -4, -2, 0, 2, 4, 4, 3, 1, -2],
 
   // Bass boost: strong low-end emphasis, slightly reduced upper highs
   bassBoost: [8, 7, 6, 4, 2, 0, -1, -2, -3, -4],
@@ -181,8 +178,39 @@ const EQ_PRESETS = {
 // Utilities
 // ---------------------------------------------------------------------
 
-function keyForTab(tabId) {
-  return `vol_tab_${tabId}`;
+const HOST_VOL_CAP = 200;
+const HOST_VOL_MAX_BYTES = 7000;
+
+function getHostVolume(list, host) {
+  if (!Array.isArray(list) || !host) return undefined;
+  const e = list.find(x => Array.isArray(x) && x[0] === host);
+  return e && typeof e[1] === "number" ? e[1] : undefined;
+}
+
+function setHostVolume(list, host, value) {
+  const arr = Array.isArray(list)
+    ? list.filter(x => Array.isArray(x) && x[0] !== host)
+    : [];
+  arr.unshift([host, value]);
+  if (arr.length > HOST_VOL_CAP) arr.length = HOST_VOL_CAP;
+  while (arr.length > 1 &&
+    new TextEncoder().encode(JSON.stringify(arr)).length > HOST_VOL_MAX_BYTES) {
+    arr.pop();
+  }
+  return arr;
+}
+
+let hostVolumes = [];
+let globalVolume = 100;
+
+function persistVolume(value) {
+  if (prefs.remember && currentHost) {
+    hostVolumes = setHostVolume(hostVolumes, currentHost, value);
+    storageSet({ vol_hosts: hostVolumes });
+  } else {
+    globalVolume = value;
+    storageSet({ vol_global: value });
+  }
 }
 
 function maxVolume() {
@@ -315,9 +343,15 @@ function setMode(mode) {
     btn.classList.remove("active");
   });
 
-  if (mode === "default" && defaultBtn) defaultBtn.classList.add("active");
-  if (mode === "voice" && voiceBtn) voiceBtn.classList.add("active");
-  if (mode === "bass" && bassBtn) bassBtn.classList.add("active");
+  [defaultBtn, voiceBtn, bassBtn].forEach(btn => {
+    if (btn) btn.setAttribute("aria-pressed", "false");
+  });
+  const activeBtn =
+    mode === "voice" ? voiceBtn : mode === "bass" ? bassBtn : defaultBtn;
+  if (activeBtn) {
+    activeBtn.classList.add("active");
+    activeBtn.setAttribute("aria-pressed", "true");
+  }
 
   if (effectsEnabled) {
     sendToTab({ action: "setMode", mode });
@@ -446,8 +480,12 @@ async function loadPrefsAndTab() {
     eqCustomGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     eqPreset: "flat",
     mode: "default",
-    vol_global: 100
+    vol_global: 100,
+    vol_hosts: []
   });
+
+  hostVolumes = Array.isArray(data.vol_hosts) ? data.vol_hosts : [];
+  globalVolume = typeof data.vol_global === "number" ? data.vol_global : 100;
 
   prefs.showBadge =
     data.showBadge !== undefined ? !!data.showBadge : prefs.showBadge;
@@ -479,6 +517,8 @@ async function loadPrefsAndTab() {
   if (rememberVolEl) rememberVolEl.checked = prefs.remember;
   if (start100El) start100El.checked = prefs.start100;
   if (overdriveEl) overdriveEl.checked = prefs.overdrive;
+
+  if (prefs.eqPreset === "speech") prefs.eqPreset = "vocalBoost"; // migrated
 
   if (eqPresetSelect) {
     ensurePresetOptions();
@@ -560,7 +600,6 @@ async function loadPrefsAndTab() {
 
   let percent = 100;
   lastSentVolume = null;
-  const key = keyForTab(currentTabId);
 
   // If the content script isn't responding yet, assume no WebAudio hook.
   pageCanBoost = false;
@@ -570,8 +609,9 @@ async function loadPrefsAndTab() {
     setEffectsEnabledForPage(true, "");
   }
 
-  if (prefs.remember && typeof data[key] === "number") {
-    percent = data[key];
+  const remembered = getHostVolume(hostVolumes, currentHost);
+  if (prefs.remember && typeof remembered === "number") {
+    percent = remembered;
   } else if (!prefs.remember && typeof data.vol_global === "number") {
     percent = data.vol_global;
   } else if (prefs.start100) {
@@ -664,6 +704,17 @@ async function loadTabsList() {
 // ---------------------------------------------------------------------
 
 function initEvents() {
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (eqPanel && eqPanel.classList.contains("open")) {
+      eqPanel.classList.remove("open");
+      if (eqBtn) { eqBtn.setAttribute("aria-expanded", "false"); eqBtn.focus(); }
+    } else if (panel && panel.classList.contains("open")) {
+      panel.classList.remove("open");
+      if (gearBtn) { gearBtn.setAttribute("aria-expanded", "false"); gearBtn.focus(); }
+    }
+  });
+
   if (slider) {
     slider.addEventListener("input", () => {
       const limit = maxVolume();
@@ -679,13 +730,7 @@ function initEvents() {
       let value = Number(slider.value) || 0;
       value = Math.max(0, Math.min(value, limit));
 
-      const data = {};
-      if (prefs.remember && currentTabId) {
-        data[keyForTab(currentTabId)] = value;
-      } else {
-        data.vol_global = value;
-      }
-      storageSet(data);
+      persistVolume(value);
     });
   }
 
@@ -696,13 +741,7 @@ function initEvents() {
 
       setSlider(newValue);
 
-      const data = {};
-      if (prefs.remember && currentTabId) {
-        data[keyForTab(currentTabId)] = newValue;
-      } else {
-        data.vol_global = newValue;
-      }
-      storageSet(data);
+      persistVolume(newValue);
 
       muteBtn.textContent = newValue === 0 ? "Unmute" : "Mute";
     });
@@ -712,13 +751,7 @@ function initEvents() {
     resetBtn.addEventListener("click", () => {
       setSlider(100);
 
-      const data = {};
-      if (prefs.remember && currentTabId) {
-        data[keyForTab(currentTabId)] = 100;
-      } else {
-        data.vol_global = 100;
-      }
-      storageSet(data);
+      persistVolume(100);
 
       if (muteBtn) muteBtn.textContent = "Mute";
     });
@@ -732,12 +765,19 @@ function initEvents() {
   if (gearBtn && panel) {
     gearBtn.addEventListener("click", () => {
       panel.classList.add("open");
+      gearBtn.setAttribute("aria-expanded", "true");
+      const first = panel.querySelector("select, input, button");
+      if (first) first.focus();
     });
   }
 
   if (closePanel && panel) {
     closePanel.addEventListener("click", () => {
       panel.classList.remove("open");
+      if (gearBtn) {
+        gearBtn.setAttribute("aria-expanded", "false");
+        gearBtn.focus();
+      }
     });
   }
 
@@ -767,12 +807,19 @@ function initEvents() {
   if (eqBtn && eqPanel) {
     eqBtn.addEventListener("click", () => {
       eqPanel.classList.add("open");
+      eqBtn.setAttribute("aria-expanded", "true");
+      const first = eqPanel.querySelector("select, input, button");
+      if (first) first.focus();
     });
   }
 
   if (closeEqPanel && eqPanel) {
     closeEqPanel.addEventListener("click", () => {
       eqPanel.classList.remove("open");
+      if (eqBtn) {
+        eqBtn.setAttribute("aria-expanded", "false");
+        eqBtn.focus();
+      }
     });
   }
 
@@ -790,6 +837,7 @@ function initEvents() {
 
       const label = eqValueEls[idx];
       if (label) label.textContent = formatDb(val);
+      sendEqToContent();
     });
 
     input.addEventListener("change", () => {

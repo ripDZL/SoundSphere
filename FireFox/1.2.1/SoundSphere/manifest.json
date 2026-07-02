@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "SoundSphere",
-  "version": "1.2",
+  "version": "1.2.1",
   "description": "Smart volume boost and 10-band EQ for your browser audio. Boost, shape, and tame loudness without leaving the tab.",
   "icons": {
     "16": "icon/speaker16px.png",
