@@ -32,29 +32,6 @@
     "offscreen",
     "activeTab"
   ],
-  "host_permissions": [
-    "*://*.youtube.com/*",
-    "*://music.youtube.com/*",
-    "*://*.bandcamp.com/*",
-    "*://*.soundcloud.com/*",
-    "*://open.spotify.com/*",
-    "*://music.amazon.com/*",
-    "*://*.twitch.tv/*"
-  ],
-  "content_scripts": [
-    {
-      "matches": [
-        "*://*.youtube.com/*",
-        "*://music.youtube.com/*",
-        "*://*.bandcamp.com/*",
-        "*://*.soundcloud.com/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
   "web_accessible_resources": [
     {
       "resources": [

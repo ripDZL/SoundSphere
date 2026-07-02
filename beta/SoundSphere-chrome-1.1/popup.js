@@ -317,10 +317,6 @@ const EQ_PRESETS = {
   // Strong low cut, reduced mud, boosted presence, slightly tamed air.
   liveClean: [-12, -8, -4, -2, 0, 2, 4, 4, 2, -2],
 
-  // Additional presets mapped to UI labels
-  // Speech: presence boost, reduced rumble
-  speech: [-6, -4, -2, 0, 2, 4, 4, 3, 1, -2],
-
   // Bass boost: strong low-end emphasis, slightly reduced upper highs
   bassBoost: [8, 7, 6, 4, 2, 0, -1, -2, -3, -4],
 
@@ -713,6 +709,8 @@ async function loadPrefsAndTab() {
   if (start100El) start100El.checked = prefs.start100;
   if (overdriveEl) overdriveEl.checked = prefs.overdrive;
 
+  if (prefs.eqPreset === "speech") prefs.eqPreset = "vocalBoost"; // migrated
+
   if (eqPresetSelect) {
     ensurePresetOptions();
 
@@ -976,6 +974,7 @@ function initEvents() {
 
       const label = eqValueEls[idx];
       if (label) label.textContent = formatDb(val);
+      sendEqToContent(); // audible while dragging; persisted on release
     });
 
     input.addEventListener("change", () => {

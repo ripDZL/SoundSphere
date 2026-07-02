@@ -10,7 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
     showBadge: true,
     rememberVolume: true,
     startAt100: false,
-    overdrive: false
+    overdrive: true
   };
 
   chrome.storage.sync.get(defaults, prefs => {
