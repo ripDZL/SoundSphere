@@ -31,15 +31,5 @@
     "tabCapture",
     "offscreen",
     "activeTab"
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "fonts/JetBrainsMono-ExtraBold.woff2"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
   ]
 }
