@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SoundSphere Options</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>SoundSphere Options</h1>
+
+    <div class="option-group">
+      <label>
+        <input type="checkbox" id="showBadge">
+        <span>Show number of playing tabs on the icon</span>
+      </label>
+    </div>
+
+    <div class="option-group">
+      <label>
+        <input type="checkbox" id="rememberVolume">
+        <span>Remember volume per tab</span>
+      </label>
+    </div>
+
+    <div class="option-group">
+      <label>
+        <input type="checkbox" id="startAt100">
+        <span>Always start new tabs at 100% volume</span>
+      </label>
+    </div>
+
+    <div class="option-group">
+      <label>
+        <input type="checkbox" id="overdrive">
+        <span>Experimental Overdrive Mode (may distort)</span>
+      </label>
+    </div>
+
+    <div class="option-group">
+<div class="hint">
+        Enables a header-compatibility layer for audio/video responses so SoundSphere can attach WebAudio processing more reliably.
+      </div>
+    </div>
+
+    <div class="option-group">
+      <label>
+        <input type="checkbox" id="spotifyExperimental">
+        <span>Spotify: Experimental processing (may break playback)</span>
+      </label>
+      <div class="hint">
+        Off by default. When enabled, SoundSphere will attempt to attach in-page WebAudio processing on the Spotify web player.
+        If Spotify audio cuts out or becomes unstable, turn this back off.
+      </div>
+    </div>
+
+    <button id="save">Save Settings</button>
+    <div id="status"></div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
