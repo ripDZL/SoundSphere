@@ -181,9 +181,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "ss-set-volume") {
-    chrome.runtime.sendMessage({ target: "offscreen", type: "volume", volume: msg.volume });
-    sendResponse({ ok: true });
-    return;
+    chrome.runtime.sendMessage({ target: "offscreen", type: "volume", volume: msg.volume })
+      .then(resp => sendResponse(resp || { ok: true }))
+      .catch(() => sendResponse({ ok: false, needsStart: true }));
+    return true; // async
   }
 
   if (msg.type === "ss-set-mode") {
@@ -208,14 +209,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // Lifecycle: release the capture when the captured tab goes away or reloads /
 // cross-navigates, so we never hold a dead capture. (SPA navigations within a
 // tab don't fire "loading", so in-page YouTube nav keeps the boost.)
+// Release the capture only when the captured tab is actually CLOSED. We do NOT
+// stop on tab "loading" — YouTube fires that during normal use, which tore down
+// a live capture and left controls dead. Reload/nav is handled by the capture
+// track's "ended" event in the offscreen doc, which lets the next control re-hook.
 chrome.tabs.onRemoved.addListener(tabId => {
   if (tabId === activeCaptureTabId) stopCapture();
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (tabId === activeCaptureTabId && changeInfo.status === "loading") {
-    stopCapture();
-  }
 });
 
 loadBadgePreference();

@@ -110,6 +110,9 @@ async function start(streamId, tabId, volumePercent, mode, gains) {
       video: false
     });
     log("getUserMedia ok: capture stream acquired");
+    stream.getAudioTracks().forEach(t => {
+      t.onended = () => { log("capture track ended; tearing down"); teardown(); };
+    });
   } catch (e) {
     log("getUserMedia FAILED:", e && e.message);
     teardown();
@@ -157,6 +160,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "volume") {
+    if (!gainNode || !ctx) {
+      sendResponse({ ok: false, needsStart: true });
+      return;
+    }
     setVolume(msg.volume);
     sendResponse({ ok: true });
     return;

@@ -490,7 +490,14 @@ function applyEngineVolume(value) {
       }
     );
   } else {
-    chrome.runtime.sendMessage({ type: "ss-set-volume", volume: value });
+    chrome.runtime.sendMessage({ type: "ss-set-volume", volume: value }, resp => {
+      if (chrome.runtime.lastError) return;
+      if (resp && resp.needsStart) {
+        ssLog("capture gone; re-hooking");
+        captureStarted = false;
+        applyEngineVolume(value);
+      }
+    });
   }
 }
 
