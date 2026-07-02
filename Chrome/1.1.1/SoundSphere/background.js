@@ -69,12 +69,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Path B: offscreen tabCapture engine orchestration.
-// The popup asks the background to capture the active tab; the background gets
-// a media-stream id and hands it to the offscreen document, which does the
-// actual audio capture + gain. Only one offscreen document may exist.
-// ---------------------------------------------------------------------------
+// Tab-capture orchestration. The popup asks us to capture the active tab; we
+// obtain a media-stream id and hand it to the offscreen document, which does
+// the actual capture and audio processing. Only one offscreen doc may exist.
 
 function ssLog(...args) {
   console.log("[SS bg]", ...args);

@@ -526,7 +526,7 @@ async function loadPrefsAndTab() {
   if (start100El) start100El.checked = prefs.start100;
   if (overdriveEl) overdriveEl.checked = prefs.overdrive;
 
-  if (prefs.eqPreset === "speech") prefs.eqPreset = "vocalBoost"; // migrated
+  if (prefs.eqPreset === "speech") prefs.eqPreset = "vocalBoost";
 
   if (eqPresetSelect) {
     ensurePresetOptions();

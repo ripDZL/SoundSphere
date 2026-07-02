@@ -452,9 +452,9 @@ function sendToTab(message) {
 // Volume and mode handling
 // ---------------------------------------------------------------------
 
-// Path B (increment 3): every site is controlled by the offscreen tabCapture
-// engine. Capture starts on first apply (opening the popup is the activeTab
-// user invocation tabCapture needs); later changes just update the gain.
+// Volume for every site runs through the offscreen tab-capture engine.
+// Capture starts on the first apply (opening the popup is the activeTab
+// gesture tabCapture requires); later changes just adjust the gain.
 function applyEngineVolume(value) {
   if (currentTabId == null) return;
   if (!captureStarted) {
@@ -723,7 +723,7 @@ async function loadPrefsAndTab() {
   if (start100El) start100El.checked = prefs.start100;
   if (overdriveEl) overdriveEl.checked = prefs.overdrive;
 
-  if (prefs.eqPreset === "speech") prefs.eqPreset = "vocalBoost"; // migrated
+  if (prefs.eqPreset === "speech") prefs.eqPreset = "vocalBoost";
 
   if (eqPresetSelect) {
     ensurePresetOptions();
@@ -754,8 +754,8 @@ async function loadPrefsAndTab() {
   captureStarted = false;
   captureRetries = 0;
   ssLog("tab resolved:", currentTabId, currentHost || "(no host)");
-  // Path B: all sites use the offscreen engine; mode/EQ ride along in the
-  // capture start payload, so there is no per-load engine push here.
+  // Mode and EQ travel in the capture-start payload, so there's nothing
+  // extra to push to the engine on load.
 
   let state = null;
   try {

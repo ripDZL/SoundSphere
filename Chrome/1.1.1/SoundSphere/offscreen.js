@@ -1,9 +1,9 @@
-// SoundSphere offscreen audio engine (Path B).
+// SoundSphere offscreen audio engine.
 //
-// Captures a tab's final mixed audio via a tabCapture media-stream id and runs
-// it through gain -> mode filter -> 10-band EQ -> compressor. Works on YouTube
-// live/SABR/DRM and any audible tab, because it taps post-mix output rather
-// than a media element. DSP matches the original content-script graph.
+// Captures a tab's mixed audio from a tabCapture stream and runs it through
+// gain -> mode filter -> 10-band EQ -> compressor. Because it taps the tab's
+// post-mix output rather than a media element, it works on live streams,
+// DRM-protected playback, and any other audible tab.
 
 const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
