@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SoundSphere Engine</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        padding: 16px 18px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+        background: #020617;
+        color: #e5e7eb;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 6px 0;
+        font-weight: 600;
+        color: #00ff9d;
+      }
+      h2 {
+        font-size: 13px;
+        margin: 14px 0 4px 0;
+        font-weight: 600;
+        color: #c4b5fd;
+      }
+      p {
+        margin: 0 0 6px 0;
+      }
+      ul {
+        margin: 4px 0 8px 18px;
+        padding: 0;
+      }
+      li {
+        margin: 2px 0;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        background: #020617;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .hint {
+        opacity: 0.9;
+      }
+      .note {
+        margin-top: 10px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: rgba(148, 163, 184, 0.12);
+        border: 1px solid rgba(148, 163, 184, 0.35);
+      }
+      a {
+        color: #38bdf8;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SoundSphere Engine Tab</h1>
+
+    <p class="hint">
+      This pinned tab is where <strong>SoundSphere</strong> does its heavy audio work
+      for certain streaming and music sites.
+    </p>
+
+    <div class="note">
+      <strong>Can I close this tab?</strong><br />
+      You can, but if you do, SoundSphere will stop boosting and EQ‑ing audio
+      on sites that rely on this engine (Bandcamp, SoundCloud, Spotify Web,
+      Amazon Music, Twitch, some Jellyfin setups, etc.) until it is opened again.
+      The extension will recreate this tab automatically next time you use it.
+    </div>
+
+    <h2>Why is this needed?</h2>
+    <p>
+      Chrome’s newer extension rules (<em>Manifest V3</em>) limit what extensions
+      are allowed to do with background pages. For some sites, the only safe and
+      reliable way to process audio is to:
+    </p>
+    <ul>
+      <li>capture the tab’s audio stream with <code>chrome.tabCapture</code>, and</li>
+      <li>run the volume boost + EQ in a dedicated engine tab like this one.</li>
+    </ul>
+
+    <p>
+      This keeps your audio processing:
+    </p>
+    <ul>
+      <li>local to your browser,</li>
+      <li>under your control, and</li>
+      <li>active even if you close the SoundSphere popup or switch windows.</li>
+    </ul>
+
+    <h2>Where can I learn more?</h2>
+    <p>
+      If you are curious about the technical details, these official Chrome docs
+      explain the rules that led to this design:
+    </p>
+    <ul>
+      <li>
+        <a href="https://developer.chrome.com/docs/extensions/develop/migrate"
+           target="_blank" rel="noreferrer noopener">Manifest V3 migration guide</a>
+      </li>
+      <li>
+        <a href="https://developer.chrome.com/docs/extensions/reference/api/tabCapture"
+           target="_blank" rel="noreferrer noopener">chrome.tabCapture API docs</a>
+      </li>
+    </ul>
+
+    <p class="hint">
+      You can safely ignore this tab and just leave it pinned. Think of it as
+      the "amp rack" behind your browser’s sound system.
+    </p>
+
+    <script src="engine.js"></script>
+  </body>
+</html>
