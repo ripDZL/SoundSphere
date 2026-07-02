@@ -86,14 +86,9 @@ const DRM_GUARD = (() => {
   }
 
   if (IS_SPOTIFY) {
-    // Scan periodically for a short time after load. Spotify often creates
-    // the media element lazily after user interaction.
-    let ticks = 0;
-    const t = setInterval(() => {
-      scan();
-      ticks++;
-      if (state.inUse || ticks >= 40) clearInterval(t); // ~100s max
-    }, 2500);
+    // One delayed rescan after load; lazily-created media elements are
+    // caught event-driven by the MutationObserver and the capture-phase
+    // "play" listener, so no polling loop is needed.
     setTimeout(scan, 600);
   }
 
