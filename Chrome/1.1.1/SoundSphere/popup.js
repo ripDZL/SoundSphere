@@ -543,9 +543,15 @@ function setMode(mode) {
     btn.classList.remove("active");
   });
 
-  if (mode === "default" && defaultBtn) defaultBtn.classList.add("active");
-  if (mode === "voice" && voiceBtn) voiceBtn.classList.add("active");
-  if (mode === "bass" && bassBtn) bassBtn.classList.add("active");
+  [defaultBtn, voiceBtn, bassBtn].forEach(btn => {
+    if (btn) btn.setAttribute("aria-pressed", "false");
+  });
+  const activeBtn =
+    mode === "voice" ? voiceBtn : mode === "bass" ? bassBtn : defaultBtn;
+  if (activeBtn) {
+    activeBtn.classList.add("active");
+    activeBtn.setAttribute("aria-pressed", "true");
+  }
 
   storageSet({ mode });
   chrome.runtime.sendMessage({ type: "ss-set-mode", mode });
@@ -875,6 +881,7 @@ function initEvents() {
       let value = Number(slider.value) || 0;
       value = Math.max(0, Math.min(value, limit));
       slider.value = String(value);
+      slider.setAttribute("aria-valuetext", value + "%");
       showDisplay(value);
       applyVolume(value);
     });
@@ -916,12 +923,19 @@ function initEvents() {
   if (gearBtn && panel) {
     gearBtn.addEventListener("click", () => {
       panel.classList.add("open");
+      gearBtn.setAttribute("aria-expanded", "true");
+      const first = panel.querySelector("input, select, button");
+      if (first) first.focus();
     });
   }
 
   if (closePanel && panel) {
     closePanel.addEventListener("click", () => {
       panel.classList.remove("open");
+      if (gearBtn) {
+        gearBtn.setAttribute("aria-expanded", "false");
+        gearBtn.focus();
+      }
     });
   }
 
@@ -951,14 +965,33 @@ function initEvents() {
   if (eqBtn && eqPanel) {
     eqBtn.addEventListener("click", () => {
       eqPanel.classList.add("open");
+      eqBtn.setAttribute("aria-expanded", "true");
+      const first = eqPanel.querySelector("select, input, button");
+      if (first) first.focus();
     });
   }
 
   if (closeEqPanel && eqPanel) {
     closeEqPanel.addEventListener("click", () => {
       eqPanel.classList.remove("open");
+      if (eqBtn) {
+        eqBtn.setAttribute("aria-expanded", "false");
+        eqBtn.focus();
+      }
     });
   }
+
+  // Escape closes whichever panel is open, returning focus to its opener.
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (eqPanel && eqPanel.classList.contains("open")) {
+      eqPanel.classList.remove("open");
+      if (eqBtn) { eqBtn.setAttribute("aria-expanded", "false"); eqBtn.focus(); }
+    } else if (panel && panel.classList.contains("open")) {
+      panel.classList.remove("open");
+      if (gearBtn) { gearBtn.setAttribute("aria-expanded", "false"); gearBtn.focus(); }
+    }
+  });
 
   if (eqResetBtn) {
     eqResetBtn.addEventListener("click", () => {
