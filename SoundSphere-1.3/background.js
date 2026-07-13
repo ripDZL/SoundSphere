@@ -1,7 +1,7 @@
 "use strict";
 
 /*
-  SoundSphere 2.0 background coordinator.
+  SoundSphere 1.3 background coordinator.
 
   Chrome path:
     popup -> service worker -> tabCapture stream id -> offscreen WebAudio engine

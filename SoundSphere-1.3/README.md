@@ -1,4 +1,4 @@
-# SoundSphere 2.0
+# SoundSphere 1.3
 
 ## Architecture
 
@@ -34,7 +34,7 @@
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Choose Load unpacked.
-4. Select `SoundSphere-2.0`.
+4. Select `SoundSphere-1.3`.
 
 ### Firefox
 

@@ -1,7 +1,7 @@
 "use strict";
 
 /*
-  SoundSphere 2.0 content fallback.
+  SoundSphere 1.3 content fallback.
 
   Chrome normally uses tabCapture in the offscreen engine. This script stays
   passive until the background script explicitly asks for fallback control.
