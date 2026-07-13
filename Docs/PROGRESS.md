@@ -10,3 +10,5 @@
 - Added tab-scoped remembered volume with tab-close cleanup.
 - Added install/test notes in `SoundSphere-1.3/README.md`.
 - Fixed Bandcamp mute regression by making Chrome content fallback passive until requested.
+- Built `SoundSphere-1.3-chrome.zip`.
+- Built `SoundSphere-1.3-firefox.zip`.

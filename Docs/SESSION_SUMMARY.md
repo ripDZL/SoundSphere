@@ -5,4 +5,6 @@
 - Decision: keep legacy folders intact and add clean `SoundSphere-1.3/`.
 - Constraint: DRM/protected playback is fallback-only; no bypass attempts.
 - Deliverable: complete unpacked extension package at `SoundSphere-1.3/`.
+- Deliverable: Chrome archive `SoundSphere-1.3-chrome.zip`.
+- Deliverable: Firefox archive `SoundSphere-1.3-firefox.zip`.
 - Fix: Bandcamp exposed an eager media-element hook; content fallback now starts only after background requests fallback control.
