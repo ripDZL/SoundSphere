@@ -12,3 +12,8 @@
 - Fixed Bandcamp mute regression by making Chrome content fallback passive until requested.
 - Built `SoundSphere-1.3-chrome.zip`.
 - Built `SoundSphere-1.3-firefox.zip`.
+- Added Firefox-only background coordinator for AMO lint compatibility.
+- Added Firefox no-data collection manifest disclosure.
+- Rebuilt Chrome and Firefox 1.3 store submission zips.
+- Firefox package passes `web-ext lint` with 0 errors, 0 notices, 0 warnings.
+- Chrome and Firefox packages pass static remote-code scan.

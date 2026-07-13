@@ -9,6 +9,7 @@
   - Each captured tab gets an independent graph: gain, quick mode, 10-band EQ, compressor, soft clip, output.
 - Firefox:
   - Use `manifest.firefox.json` as `manifest.json` when packaging.
+  - Minimum supported Firefox version is 140.0 so AMO's built-in data-consent manifest key is supported.
   - Firefox uses `content.js` because Firefox does not support Chrome's offscreen tab-capture path.
   - The content script tries media-element WebAudio, then page WebAudio tap, then basic 0-100 element volume.
 - Fallback:
@@ -20,6 +21,7 @@
 - `manifest.json` - Chrome MV3 package.
 - `manifest.firefox.json` - Firefox MV3 package manifest.
 - `background.js` - badge state, capture orchestration, backend selection.
+- `background.firefox.js` - Firefox-only content fallback coordinator.
 - `offscreen.html`, `offscreen.js` - Chrome tab-capture WebAudio engine.
 - `content.js` - Firefox and fallback page audio processor.
 - `inject/webaudio_tap.js` - best-effort page WebAudio destination tap.
