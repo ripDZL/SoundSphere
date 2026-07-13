@@ -1,0 +1,81 @@
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/JetBrainsMono-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: #0b1018;
+  color: #eef4f8;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  font-weight: 800;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+.container {
+  width: min(560px, 100%);
+  height: fit-content;
+  padding: 22px;
+  border: 1px solid #2b394d;
+  border-radius: 8px;
+  background: #121a26;
+}
+
+h1 {
+  margin: 0 0 18px;
+  color: #00d084;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  color: #eef4f8;
+  font-size: 14px;
+}
+
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #00d084;
+}
+
+button {
+  margin-top: 18px;
+  min-height: 38px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 8px;
+  background: #00d084;
+  color: #07130d;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #16e39a;
+}
+
+#status {
+  min-height: 18px;
+  margin-top: 12px;
+  color: #93a4b7;
+  font-size: 13px;
+}

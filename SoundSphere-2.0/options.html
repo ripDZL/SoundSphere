@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SoundSphere Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="container">
+    <h1>SoundSphere Options</h1>
+
+    <label class="option-row">
+      <input id="showBadge" type="checkbox">
+      <span>Show playing-tab badge</span>
+    </label>
+
+    <label class="option-row">
+      <input id="rememberVolume" type="checkbox">
+      <span>Remember tab volume</span>
+    </label>
+
+    <label class="option-row">
+      <input id="startAt100" type="checkbox">
+      <span>Start new tabs at 100%</span>
+    </label>
+
+    <label class="option-row">
+      <input id="overdrive" type="checkbox">
+      <span>Allow 800% overdrive</span>
+    </label>
+
+    <button id="save" type="button">Save</button>
+    <div id="status" role="status"></div>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>

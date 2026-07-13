@@ -1,0 +1,25 @@
+# Architecture
+
+- Chrome:
+  - `manifest.json`
+  - `background.js` service worker
+  - `offscreen.html` + `offscreen.js`
+  - whole-tab audio via `chrome.tabCapture.getMediaStreamId`
+  - one WebAudio graph per captured tab
+- Firefox:
+  - `manifest.firefox.json`
+  - `background.js` as background script
+  - `content.js` media-element/page-WebAudio processor
+- Shared UI:
+  - `popup.*`
+  - `options.*`
+- Storage:
+  - `vol_tabs`: tab-id volume map in `storage.local`
+  - `vol_global`: global fallback volume
+  - `mode`, `eqGains`, `eqPreset`, `eqCustomGains`
+  - `showBadge`, `rememberVolume`, `startAt100`, `overdrive`
+- Fallback order:
+  - Chrome whole-tab capture
+  - media-element WebAudio
+  - page WebAudio tap
+  - basic 0-100 element volume

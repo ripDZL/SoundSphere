@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "SoundSphere",
+  "version": "2.0.0",
+  "minimum_chrome_version": "116",
+  "description": "Reliable per-tab volume boost and 10-band EQ for browser audio.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon/speaker16px.png",
+      "32": "icon/speaker32px.png",
+      "48": "icon/speaker48px.png",
+      "96": "icon/speaker96px.png",
+      "128": "icon/speaker128px.png"
+    }
+  },
+  "icons": {
+    "16": "icon/speaker16px.png",
+    "32": "icon/speaker32px.png",
+    "48": "icon/speaker48px.png",
+    "96": "icon/speaker96px.png",
+    "128": "icon/speaker128px.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "activeTab",
+    "offscreen",
+    "storage",
+    "tabCapture",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/JetBrainsMono-ExtraBold.woff2",
+        "inject/webaudio_tap.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "options_page": "options.html"
+}

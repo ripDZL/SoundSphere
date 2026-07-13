@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main id="app">
+    <header class="topbar">
+      <div>
+        <h1>SoundSphere</h1>
+        <div id="engineStatus" class="engine-status">Ready</div>
+      </div>
+      <div class="top-actions">
+        <button id="eqBtn" class="icon-button" type="button" title="Equalizer" aria-label="Equalizer" aria-expanded="false">EQ</button>
+        <button id="settingsBtn" class="icon-button" type="button" title="Settings" aria-label="Settings" aria-expanded="false">
+          <img src="icon/gear32px.png" width="18" height="18" alt="">
+        </button>
+      </div>
+    </header>
+
+    <section class="volume-section">
+      <div id="volumeDisplay" class="volume-display">100%</div>
+      <input id="volumeSlider" class="slider" type="range" min="0" max="800" step="5" value="100" aria-label="Volume">
+      <div id="volumeWarning" class="volume-warning">High boost can distort audio.</div>
+    </section>
+
+    <section class="button-row">
+      <button id="muteBtn" class="button" type="button">Mute</button>
+      <button id="resetBtn" class="button button-primary" type="button">100%</button>
+    </section>
+
+    <section class="mode-row" aria-label="Quick modes">
+      <button id="defaultBtn" class="mode-button active" type="button" aria-pressed="true">Default</button>
+      <button id="voiceBtn" class="mode-button" type="button" aria-pressed="false">Voice</button>
+      <button id="bassBtn" class="mode-button" type="button" aria-pressed="false">Bass</button>
+    </section>
+
+    <section class="tabs-section">
+      <div class="section-header">
+        <span>Playing Tabs</span>
+        <span id="tabCount">0</span>
+      </div>
+      <div id="tabsList" class="tabs-list"></div>
+    </section>
+  </main>
+
+  <section id="settingsPanel" class="panel" role="dialog" aria-label="Settings">
+    <div class="panel-header">
+      <strong>Settings</strong>
+      <button id="closeSettings" class="close-button" type="button" aria-label="Close settings">x</button>
+    </div>
+    <label class="check-row">
+      <input id="showBadge" type="checkbox">
+      <span>Show playing-tab badge</span>
+    </label>
+    <label class="check-row">
+      <input id="rememberVolume" type="checkbox">
+      <span>Remember this tab</span>
+    </label>
+    <label class="check-row">
+      <input id="startAt100" type="checkbox">
+      <span>Start new tabs at 100%</span>
+    </label>
+    <label class="check-row">
+      <input id="overdrive" type="checkbox">
+      <span>Allow 800% overdrive</span>
+    </label>
+    <button id="saveSettings" class="button button-primary full-width" type="button">Save</button>
+  </section>
+
+  <section id="eqPanel" class="panel" role="dialog" aria-label="Equalizer">
+    <div class="panel-header">
+      <strong>Equalizer</strong>
+      <button id="closeEq" class="close-button" type="button" aria-label="Close equalizer">x</button>
+    </div>
+    <div class="preset-row">
+      <label for="eqPreset">Preset</label>
+      <select id="eqPreset">
+        <option value="flat">Flat</option>
+        <option value="rock">Rock</option>
+        <option value="pop">Pop</option>
+        <option value="hipHop">Hip-Hop</option>
+        <option value="jazz">Jazz</option>
+        <option value="classical">Classical</option>
+        <option value="electronic">Electronic</option>
+        <option value="vocalBoost">Vocal</option>
+        <option value="liveClean">Live Clean</option>
+        <option value="bassBoost">Bass Boost</option>
+        <option value="trebleBoost">Treble Boost</option>
+        <option value="vShape">V-Shape</option>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+    <div id="eqGrid" class="eq-grid"></div>
+    <button id="eqReset" class="button button-primary full-width" type="button">Reset EQ</button>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>
