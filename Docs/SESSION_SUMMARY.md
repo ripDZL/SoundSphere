@@ -5,3 +5,4 @@
 - Decision: keep legacy folders intact and add clean `SoundSphere-2.0/`.
 - Constraint: DRM/protected playback is fallback-only; no bypass attempts.
 - Deliverable: complete unpacked extension package at `SoundSphere-2.0/`.
+- Fix: Bandcamp exposed an eager media-element hook; content fallback now starts only after background requests fallback control.

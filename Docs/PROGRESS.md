@@ -9,3 +9,4 @@
 - Added modern popup and options page.
 - Added tab-scoped remembered volume with tab-close cleanup.
 - Added install/test notes in `SoundSphere-2.0/README.md`.
+- Fixed Bandcamp mute regression by making Chrome content fallback passive until requested.

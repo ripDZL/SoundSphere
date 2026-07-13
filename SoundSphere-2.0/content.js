@@ -3,8 +3,12 @@
 /*
   SoundSphere 2.0 content fallback.
 
-  Chrome normally uses tabCapture in the offscreen engine. This script is still
-  needed for Firefox and for Chrome pages where tabCapture is unavailable.
+  Chrome normally uses tabCapture in the offscreen engine. This script stays
+  passive until the background script explicitly asks for fallback control.
+  That matters on sites like Bandcamp: eagerly calling createMediaElementSource()
+  can reroute the site's own <audio> element into a suspended AudioContext.
+
+  This script is still needed for Firefox and for Chrome pages where tabCapture is unavailable.
   It tries media-element WebAudio first, then falls back to basic 0-100 volume.
 */
 
@@ -408,9 +412,3 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return undefined;
 });
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => controller.start(), { once: true });
-} else {
-  controller.start();
-}
