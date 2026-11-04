@@ -8,8 +8,58 @@
 */
 
 const ACTION = chrome.action || chrome.browserAction;
+// Promise-based namespace for APIs used with await (declarativeNetRequest).
+const API = typeof browser !== "undefined" ? browser : chrome;
 
 let showBadge = true;
+
+// Per-tab task queue: rapid slider moves must not race each other (e.g. two
+// CORS unlocks reloading the same element).
+const tabQueues = new Map();
+
+function runForTab(tabId, task) {
+  const key = String(tabId);
+  const previous = tabQueues.get(key) || Promise.resolve();
+  const next = previous.catch(() => {}).then(task);
+  tabQueues.set(key, next);
+  next.finally(() => {
+    if (tabQueues.get(key) === next) tabQueues.delete(key);
+  }).catch(() => {});
+  return next;
+}
+
+// --- CORS unlock -------------------------------------------------------------
+// Cross-origin media served without CORS headers (e.g. Bandcamp's CDN) plays
+// fine but reads as silence in WebAudio, so boost/EQ cannot apply. When the
+// user boosts such a tab, a session rule adds Access-Control-Allow-Origin to
+// that tab's media responses only, and the content script reloads the element
+// in CORS mode. Rule id = tab id; removed when the tab closes; session rules
+// never outlive the browser session.
+const CORS_RELOAD_TIMEOUT_MS = 8000;
+
+function canUnlockCors() {
+  return Boolean(API.declarativeNetRequest && typeof API.declarativeNetRequest.updateSessionRules === "function");
+}
+
+function ensureCorsRule(tabId) {
+  return API.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [tabId],
+    addRules: [{
+      id: tabId,
+      priority: 1,
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [{ header: "Access-Control-Allow-Origin", operation: "set", value: "*" }]
+      },
+      condition: { tabIds: [tabId], resourceTypes: ["media"] }
+    }]
+  });
+}
+
+function removeCorsRule(tabId) {
+  if (!canUnlockCors()) return Promise.resolve();
+  return API.declarativeNetRequest.updateSessionRules({ removeRuleIds: [tabId] }).catch(() => {});
+}
 
 function runtimeLastError() {
   const err = chrome.runtime && chrome.runtime.lastError;
@@ -37,11 +87,11 @@ function tabsQuery(queryInfo) {
 const TAB_MESSAGE_TIMEOUT_MS = 2000;
 
 // Bounded so a page that never answers can't leave the popup waiting.
-function sendTabMessage(tabId, message) {
+function sendTabMessage(tabId, message, timeoutMs = TAB_MESSAGE_TIMEOUT_MS) {
   const reply = withCallback(chrome.tabs.sendMessage, chrome.tabs, tabId, message)
     .catch(error => ({ ok: false, error: error.message || String(error) }));
   const timeout = new Promise(resolve => {
-    setTimeout(() => resolve({ ok: false, error: "Page did not respond" }), TAB_MESSAGE_TIMEOUT_MS);
+    setTimeout(() => resolve({ ok: false, error: "Page did not respond" }), timeoutMs);
   });
   return Promise.race([reply, timeout]);
 }
@@ -71,38 +121,51 @@ function storageLocalSet(values) {
   return withCallback(chrome.storage.local.set, chrome.storage.local, values).catch(() => {});
 }
 
-async function applyContentFallback(tabId, settings, reason) {
-  const response = await sendTabMessage(tabId, {
-    type: "SS_CONTENT_APPLY",
-    settings,
-    reason: reason || ""
-  });
-
+function toPopupResult(response) {
   if (!response || response.ok === false) {
     return {
       ok: false,
       mode: "unsupported",
       canBoost: false,
       advanced: false,
-      reason: reason || (response && response.error) || "No content-script audio processor on this page"
+      reason: (response && response.error) || "No content-script audio processor on this page"
     };
   }
-
   return {
     ok: true,
     mode: response.backend || "basic",
     canBoost: !!response.canBoost,
     advanced: !!response.canBoost,
-    reason: reason || response.reason || ""
+    engaged: !!response.engaged,
+    reason: response.reason || ""
   };
+}
+
+async function applySettingsNow(tabId, settings) {
+  const corsUnlock = canUnlockCors();
+  let response = await sendTabMessage(tabId, { type: "SS_CONTENT_APPLY", settings, corsUnlock });
+
+  if (corsUnlock && response && response.corsUnlockNeeded) {
+    try {
+      await ensureCorsRule(tabId);
+      const unlocked = await sendTabMessage(
+        tabId,
+        { type: "SS_CONTENT_CORS_RELOAD", corsUnlock },
+        CORS_RELOAD_TIMEOUT_MS
+      );
+      if (unlocked && unlocked.ok !== false) response = unlocked;
+    } catch (error) {
+      console.debug("SoundSphere CORS unlock failed:", error && error.message);
+    }
+  }
+  return toPopupResult(response);
 }
 
 function applySettings(tabId, settings) {
   if (!tabId) {
     return Promise.resolve({ ok: false, mode: "unsupported", canBoost: false, reason: "No active tab" });
   }
-
-  return applyContentFallback(tabId, settings, "Whole-tab capture is not available in Firefox");
+  return runForTab(tabId, () => applySettingsNow(tabId, settings));
 }
 
 async function getStatus(tabId) {
@@ -110,7 +173,7 @@ async function getStatus(tabId) {
     return { ok: false, mode: "unsupported", canBoost: false, reason: "No active tab" };
   }
 
-  const content = await sendTabMessage(tabId, { type: "SS_CONTENT_STATUS" });
+  const content = await sendTabMessage(tabId, { type: "SS_CONTENT_STATUS", corsUnlock: canUnlockCors() });
   if (content && content.ok !== false) {
     return {
       ok: true,
@@ -133,9 +196,11 @@ async function getStatus(tabId) {
   };
 }
 
-async function stopTab(tabId) {
-  await sendTabMessage(tabId, { type: "SS_CONTENT_RESET" }).catch(() => {});
-  return { ok: true };
+function stopTab(tabId) {
+  return runForTab(tabId, async () => {
+    await sendTabMessage(tabId, { type: "SS_CONTENT_RESET" });
+    return { ok: true };
+  });
 }
 
 async function refreshBadge() {
@@ -198,6 +263,7 @@ chrome.tabs.onActivated.addListener(() => refreshBadge());
 chrome.tabs.onRemoved.addListener(tabId => {
   refreshBadge();
   cleanupStoredTabVolume(tabId);
+  removeCorsRule(tabId);
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {

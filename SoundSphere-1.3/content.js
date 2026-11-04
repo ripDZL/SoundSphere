@@ -79,6 +79,95 @@ function isCorsReadable(el) {
   }
 }
 
+// Cross-origin http(s) media loaded without CORS: playable, but WebAudio
+// would read silence. Firefox can unlock it (see unlockCors).
+function isCorsBlocked(el) {
+  try {
+    if (!isMediaElement(el) || el.srcObject || el.crossOrigin) return false;
+    const src = el.currentSrc || el.src || "";
+    if (!src) return false;
+    const url = new URL(src, document.baseURI);
+    return (url.protocol === "http:" || url.protocol === "https:") &&
+      url.origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// Volume cuts and mute work on the element itself; anything louder or
+// shaped needs WebAudio.
+function needsProcessing(settings) {
+  return !settings.muted && (
+    settings.volume > 100 ||
+    settings.mode !== "default" ||
+    settings.eqGains.some(value => value !== 0)
+  );
+}
+
+const CORS_RELOAD_TIMEOUT_MS = 5000;
+const corsPending = new WeakSet(); // elements mid-reload: never hook yet
+
+// Reload one element in CORS mode, keeping position and play state. Resolves
+// true once metadata loads (now WebAudio-readable). On error or timeout the
+// crossorigin attribute is removed and the original load restored.
+function reloadWithCors(el) {
+  return new Promise(resolve => {
+    const state = {
+      time: Number(el.currentTime) || 0,
+      paused: !!el.paused,
+      rate: Number(el.playbackRate) || 1,
+      src: el.getAttribute && el.getAttribute("src") ? (el.currentSrc || el.src) : null
+    };
+    const reloadSource = () => {
+      if (state.src) el.src = state.src;
+      else el.load();
+    };
+    const restorePlayback = () => {
+      try {
+        if (state.time > 0) el.currentTime = state.time;
+        el.playbackRate = state.rate;
+      } catch {}
+      if (!state.paused) {
+        try {
+          const played = el.play();
+          if (played && typeof played.catch === "function") played.catch(() => {});
+        } catch {}
+      }
+    };
+
+    let settled = false;
+    const finish = ok => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("error", onError);
+      corsPending.delete(el);
+      if (ok) {
+        restorePlayback();
+      } else {
+        try { el.removeAttribute("crossorigin"); } catch {}
+        el.addEventListener("loadedmetadata", restorePlayback, { once: true });
+        reloadSource();
+      }
+      resolve(ok);
+    };
+    const onLoaded = () => finish(true);
+    const onError = () => finish(false);
+    const timer = setTimeout(onError, CORS_RELOAD_TIMEOUT_MS);
+
+    corsPending.add(el);
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("error", onError);
+    try {
+      el.crossOrigin = "anonymous";
+      reloadSource();
+    } catch {
+      finish(false);
+    }
+  });
+}
+
 function boostDb(settings) {
   if (settings.muted) return 0;
   const volumeDb = 20 * Math.log10(Math.max(settings.volume, 1) / 100);
@@ -299,12 +388,71 @@ class AudioBus {
   }
 }
 
-function mediaElements() {
-  try {
-    return Array.from(document.querySelectorAll("audio,video"));
-  } catch {
-    return [];
+// --- Media outside the light DOM --------------------------------------------
+// Some players never attach their element to the document (Spotify Web) or
+// keep it inside a shadow root, so querySelectorAll cannot see it. In Firefox
+// a content script can wrap the page's HTMLMediaElement.prototype.play
+// (exportFunction) and learn about every element the page plays. Elsewhere
+// this is a no-op and only DOM media is managed.
+
+const OFF_DOM_LIMIT = 64;
+const trackedMedia = [];          // WeakRef (or element) list, newest last
+const trackedSet = new WeakSet();
+let onTrackedPlay = null;         // set once the controller exists
+
+function makeRef(el) {
+  return typeof WeakRef === "function" ? new WeakRef(el) : { deref: () => el };
+}
+
+function trackMedia(el) {
+  if (!isMediaElement(el)) return;
+  if (!trackedSet.has(el)) {
+    trackedSet.add(el);
+    trackedMedia.push(makeRef(el));
+    if (trackedMedia.length > OFF_DOM_LIMIT) trackedMedia.shift();
+    // Off-DOM "encrypted" events never reach the document listener.
+    try { el.addEventListener("encrypted", () => markDrm("encrypted"), { once: true }); } catch {}
   }
+  if (onTrackedPlay) onTrackedPlay(el);
+}
+
+(function installPlayHook() {
+  if (typeof exportFunction !== "function") return;
+  let proto = null;
+  try {
+    const page = window.wrappedJSObject;
+    proto = page && page.HTMLMediaElement && page.HTMLMediaElement.prototype;
+  } catch {
+    return;
+  }
+  if (!proto || typeof proto.play !== "function") return;
+
+  const nativePlay = proto.play;
+  try {
+    exportFunction(function play(...args) {
+      try { trackMedia(this); } catch {}
+      return nativePlay.apply(this, args);
+    }, proto, { defineAs: "play" });
+  } catch {}
+})();
+
+function mediaElements() {
+  let list = [];
+  try {
+    list = Array.from(document.querySelectorAll("audio,video"));
+  } catch {}
+
+  if (trackedMedia.length) {
+    const seen = new Set(list);
+    for (const ref of trackedMedia) {
+      const el = ref.deref();
+      if (el && !seen.has(el)) {
+        seen.add(el);
+        list.push(el);
+      }
+    }
+  }
+  return list;
 }
 
 class MediaHook {
@@ -320,7 +468,7 @@ class MediaHook {
 
   // Could be rerouted through WebAudio without going silent (once running).
   canHook(el) {
-    if (!isMediaElement(el) || this.sources.has(el)) return false;
+    if (!isMediaElement(el) || this.sources.has(el) || corsPending.has(el)) return false;
     watchForDrm(el);
     if (drmState.inUse) return false;
     return isCorsReadable(el);
@@ -373,6 +521,43 @@ class SoundSphereContentController {
     // Element state SoundSphere changed, so it can be handed back untouched.
     this.originalVolume = new WeakMap();
     this.mutedByUs = new WeakSet();
+    // Set when the background can add CORS headers for this tab (Firefox).
+    this.corsUnlockAvailable = false;
+    this.corsReloads = new Map(); // element -> reload promise
+    this.corsFailed = new WeakSet();
+  }
+
+  // Cross-origin media that could be boosted once the background adds CORS
+  // headers for this tab and the element is reloaded in CORS mode.
+  corsCandidates() {
+    if (!this.corsUnlockAvailable || drmState.inUse) return [];
+    return mediaElements().filter(el => {
+      watchForDrm(el);
+      return !drmState.inUse &&
+        !this.hook.isHooked(el) &&
+        !this.corsFailed.has(el) &&
+        !this.corsReloads.has(el) &&
+        isCorsBlocked(el);
+    });
+  }
+
+  // Called by the background after it installed the tab's CORS header rule.
+  async unlockCors() {
+    for (const el of this.corsCandidates()) {
+      const reload = reloadWithCors(el).then(ok => {
+        this.corsReloads.delete(el);
+        if (!ok) this.corsFailed.add(el);
+        return ok;
+      });
+      this.corsReloads.set(el, reload);
+    }
+    await Promise.all(Array.from(this.corsReloads.values()));
+
+    this.hook.hookAll();
+    if (this.hook.hasCandidates() && !this.bus.isRunning()) {
+      if (await this.bus.waitForRunning(CONTEXT_START_WAIT_MS)) this.hook.hookAll();
+    }
+    return this.applyNow();
   }
 
   start() {
@@ -473,7 +658,12 @@ class SoundSphereContentController {
     else if (this.hook.hookedCount > 0) this.backend = "media-element";
     else if (tapState.contexts > 0) this.backend = "page-webaudio";
     else this.backend = "basic";
-    return this.status();
+
+    const result = this.status();
+    // Ask the background to unlock cross-origin media only when the user
+    // wants more than the element alone can give (boost / EQ / mode).
+    result.corsUnlockNeeded = needsProcessing(this.settings) && this.corsCandidates().length > 0;
+    return result;
   }
 
   reset() {
@@ -489,8 +679,13 @@ class SoundSphereContentController {
   status() {
     // Before the first apply nothing is hooked yet, so report what *can* be
     // boosted (CORS-readable media present) rather than what already is.
-    const canBoost = !drmState.inUse &&
-      (this.hook.hookedCount > 0 || tapState.contexts > 0 || this.hook.hasCandidates());
+    const canBoost = !drmState.inUse && (
+      this.hook.hookedCount > 0 ||
+      tapState.contexts > 0 ||
+      this.hook.hasCandidates() ||
+      this.corsReloads.size > 0 ||
+      this.corsCandidates().length > 0
+    );
 
     let reason = "";
     if (drmState.inUse) {
@@ -519,6 +714,7 @@ class SoundSphereContentController {
 }
 
 const controller = new SoundSphereContentController();
+onTrackedPlay = el => controller.onPlay(el);
 
 // The background broadcasts to every frame of the tab and keeps the first
 // answer. Frames with media answer at once; the top frame answers last as a
@@ -533,8 +729,24 @@ function isRelevantFrame() {
   return controller.hasMedia() || tapState.contexts > 0;
 }
 
+// Reloads take up to CORS_RELOAD_TIMEOUT_MS; a frame with nothing to reload
+// answers only after that so it can't pre-empt the frame doing the work.
+const TOP_FRAME_CORS_DELAY_MS = CORS_RELOAD_TIMEOUT_MS + 1000;
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") return undefined;
+  if (message.corsUnlock) controller.corsUnlockAvailable = true;
+
+  if (message.type === "SS_CONTENT_CORS_RELOAD") {
+    const relevant = controller.corsCandidates().length > 0 || controller.corsReloads.size > 0;
+    if (!relevant && !IS_TOP_FRAME) return undefined;
+    if (!relevant) {
+      setTimeout(() => sendResponse(controller.status()), TOP_FRAME_CORS_DELAY_MS);
+      return true;
+    }
+    controller.unlockCors().then(sendResponse);
+    return true;
+  }
 
   if (message.type === "SS_CONTENT_APPLY") {
     const relevant = isRelevantFrame();

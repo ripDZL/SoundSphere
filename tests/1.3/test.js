@@ -185,14 +185,26 @@ function makeChromeEnv(opts = {}) {
 // ---------------------------------------------------------------- Content env
 function makeElement(tag, props = {}) {
   const listeners = {};
-  return Object.assign({
+  const attrs = {};
+  const el = Object.assign({
     nodeType: 1, tagName: tag, src: "", currentSrc: "", crossOrigin: null, srcObject: null,
-    volume: 1, muted: false, paused: false,
-    addEventListener(t, fn) { (listeners[t] = listeners[t] || []).push(fn); },
-    removeEventListener() {},
-    _fire(t) { (listeners[t] || []).forEach(fn => fn({ type: t, target: this })); },
+    volume: 1, muted: false, paused: false, currentTime: 0, playbackRate: 1, isConnected: true,
+    loads: 0, plays: 0,
+    addEventListener(t, fn, o) {
+      const once = o && o.once;
+      const wrapped = once ? function w(e) { el.removeEventListener(t, w); return fn(e); } : fn;
+      wrapped.__orig = fn;
+      (listeners[t] = listeners[t] || []).push(wrapped);
+    },
+    removeEventListener(t, fn) { listeners[t] = (listeners[t] || []).filter(f => f !== fn && f.__orig !== fn); },
+    _fire(t) { (listeners[t] || []).slice().forEach(fn => fn({ type: t, target: el })); },
+    getAttribute(n) { return n === "src" ? (el.src || null) : (attrs[n] ?? null); },
+    removeAttribute(n) { delete attrs[n]; if (n === "crossorigin") el.crossOrigin = null; },
+    load() { el.loads++; },
+    play() { el.plays++; el.paused = false; return Promise.resolve(); },
     querySelectorAll: () => []
   }, props);
+  return el;
 }
 
 function makeContentEnv(opts = {}) {
@@ -222,14 +234,23 @@ function makeContentEnv(opts = {}) {
   };
   win.window = win;
   win.top = opts.subframe ? {} : win;
-  const sandbox = Object.assign(win, {
+  // Page-side HTMLMediaElement prototype; elements "play" through it.
+  const pageProto = { play() { this.paused = false; return "native-play"; } };
+  const extras = {};
+  if (opts.firefox) {
+    extras.wrappedJSObject = { HTMLMediaElement: { prototype: pageProto } };
+    extras.exportFunction = (fn, target, o) => { target[o.defineAs] = fn; return fn; };
+  }
+  const sandbox = Object.assign(win, extras, {
     document,
     chrome: { runtime: { onMessage: runtimeListeners, getURL: p => "moz-extension://uuid/" + p, id: "ext" } },
     MutationObserver: class { observe() {} disconnect() {} },
-    URL, console, setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, Map, Set, WeakMap, WeakSet, Symbol, Error, String, Boolean, Date, JSON
+    URL, console, setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, Map, Set, WeakMap, WeakSet, WeakRef, Symbol, Error, String, Boolean, Date, JSON
   });
   loadScript(path.join(DIR, "content.js"), sandbox);
-  const env = { world, elements, injected, docListeners, sandbox };
+  const env = { world, elements, injected, docListeners, sandbox, pageProto };
+  // Page code calling el.play() goes through the (possibly patched) prototype.
+  env.pagePlay = el => pageProto.play.call(el);
   env.send = message => new Promise(resolve => {
     let settled = false;
     const sendResponse = r => { settled = true; resolve({ responded: true, value: r }); };
@@ -241,6 +262,41 @@ function makeContentEnv(opts = {}) {
   env.firePlay = el => (docListeners.play || []).forEach(fn => fn({ type: "play", target: el }));
   const innerWindow = vm.runInContext("window", sandbox); // vm global proxy, not `win`
   env.postFromPage = data => (winListeners.message || []).forEach(fn => fn({ source: innerWindow, data }));
+  return env;
+}
+
+// ---------------------------------------------------------------- Firefox background env
+function makeFirefoxBgEnv(opts = {}) {
+  const listeners = makeEvent();
+  const onRemoved = makeEvent();
+  const env = { ruleCalls: [], tabMessages: [] };
+  const chromeFx = {
+    runtime: { id: "ext", lastError: undefined, getURL: p => "moz-extension://uuid/" + p, onMessage: listeners, onInstalled: makeEvent(), onStartup: makeEvent() },
+    tabs: {
+      query: (q, cb) => setTimeout(() => cb([]), 0),
+      sendMessage: (tabId, message, cb) => {
+        env.tabMessages.push({ tabId, message });
+        setTimeout(() => cb(opts.content ? opts.content(message) : undefined), 0);
+      },
+      onUpdated: makeEvent(), onActivated: makeEvent(), onRemoved
+    },
+    storage: { sync: makeStorageArea(), local: makeStorageArea(), onChanged: makeEvent() },
+    action: { setBadgeText() {}, setBadgeBackgroundColor() {} }
+  };
+  const browserFx = {
+    declarativeNetRequest: {
+      updateSessionRules: async info => { env.ruleCalls.push(JSON.parse(JSON.stringify(info))); }
+    }
+  };
+  loadScript(path.join(DIR, "background.firefox.js"), {
+    chrome: chromeFx, browser: browserFx, console, setTimeout, clearTimeout, Promise, Math, Number, Array, Object, Map, Set, Error, String, Boolean, JSON
+  });
+  env.onRemoved = onRemoved;
+  env.send = (message, sender = { id: "ext", url: "moz-extension://uuid/popup.html" }) => new Promise(resolve => {
+    let pending = false;
+    for (const fn of listeners.listeners) if (fn(message, sender, resolve) === true) pending = true;
+    if (!pending) resolve(undefined);
+  });
   return env;
 }
 
@@ -524,6 +580,107 @@ function findNode(world, kind) {
     await tick(150);
     assert(env.liveContexts().length === 0, "graph built for a stopped tab");
     assert(env.activeStreams.size === 0, "capture stream left running");
+  });
+
+  // ---------------- Firefox: off-DOM media (Spotify-style)
+  await test("firefox: detached DRM player gets volume + mute (no reroute)", async () => {
+    const env = makeContentEnv({ firefox: true, origin: "https://open.spotify.com", elements: [] });
+    const el = makeElement("VIDEO", { currentSrc: "blob:https://open.spotify.com/x", isConnected: false, mediaKeys: {}, volume: 0.8 });
+    env.pagePlay(el); // page plays an element never attached to the DOM
+    let r = await env.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 50 } });
+    assert(r.responded && r.value.backend === "protected-basic", "status=" + JSON.stringify(r.value));
+    assert(Math.abs(el.volume - 0.4) < 1e-9, "detached volume " + el.volume);
+    assert(env.world.mediaSources.length === 0, "DRM element rerouted");
+    await env.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 0, muted: true } });
+    assert(el.muted === true, "mute did not reach detached element");
+  });
+
+  await test("firefox: play hook keeps page behaviour (calls native, returns its value)", async () => {
+    const env = makeContentEnv({ firefox: true, elements: [] });
+    const el = makeElement("AUDIO", { isConnected: false, paused: true });
+    const ret = env.pagePlay(el);
+    assert(ret === "native-play" && el.paused === false, "native play not called / value lost");
+  });
+
+  // ---------------- Firefox: CORS unlock (Bandcamp-style)
+  const bandcamp = () => makeElement("AUDIO", { src: "https://t4.bcbits.com/stream/a.mp3", currentSrc: "https://t4.bcbits.com/stream/a.mp3", currentTime: 42, paused: false });
+
+  await test("cors: cross-origin media counts as boostable when unlock available", async () => {
+    const el = bandcamp();
+    const env = makeContentEnv({ firefox: true, origin: "https://artist.bandcamp.com", elements: [el] });
+    const st = await env.send({ type: "SS_CONTENT_STATUS", corsUnlock: true });
+    assert(st.value && st.value.canBoost, "slider would be capped at 100%");
+    const noFlag = makeContentEnv({ origin: "https://artist.bandcamp.com", elements: [bandcamp()] });
+    const st2 = await noFlag.send({ type: "SS_CONTENT_STATUS" });
+    assert(st2.value && !st2.value.canBoost, "claims boost without unlock support");
+  });
+
+  await test("cors: volume cut / mute never reloads media", async () => {
+    const el = bandcamp();
+    const env = makeContentEnv({ firefox: true, origin: "https://artist.bandcamp.com", elements: [el] });
+    const r = await env.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 60 }, corsUnlock: true });
+    assert(r.value && !r.value.corsUnlockNeeded, "asked to unlock for a plain volume cut");
+    assert(el.crossOrigin === null, "element touched");
+  });
+
+  await test("cors: boost reloads in CORS mode, restores position, then hooks", async () => {
+    const el = bandcamp();
+    const env = makeContentEnv({ firefox: true, origin: "https://artist.bandcamp.com", elements: [el] });
+    const r = await env.send({ type: "SS_CONTENT_APPLY", settings: boost, corsUnlock: true });
+    assert(r.value && r.value.corsUnlockNeeded, "unlock not requested for boost");
+    const p = env.send({ type: "SS_CONTENT_CORS_RELOAD", corsUnlock: true });
+    await tick(5);
+    assert(el.crossOrigin === "anonymous", "crossOrigin not set");
+    assert(env.world.mediaSources.length === 0, "hooked before CORS load finished");
+    el.currentTime = 0; el.paused = true; // reload resets the element
+    el._fire("loadedmetadata");
+    const done = await p;
+    assert(el.currentTime === 42 && el.plays >= 1, "position/play not restored");
+    assert(env.world.mediaSources.length === 1, "not hooked after unlock");
+    assert(done.value && done.value.backend === "media-element" && done.value.canBoost, JSON.stringify(done.value));
+  });
+
+  await test("cors: failed CORS load reverts to original playback", async () => {
+    const el = bandcamp();
+    const env = makeContentEnv({ firefox: true, origin: "https://artist.bandcamp.com", elements: [el] });
+    await env.send({ type: "SS_CONTENT_APPLY", settings: boost, corsUnlock: true });
+    const p = env.send({ type: "SS_CONTENT_CORS_RELOAD", corsUnlock: true });
+    await tick(5);
+    el._fire("error");
+    await tick(5);
+    assert(el.crossOrigin === null, "crossorigin left set after failure");
+    el._fire("loadedmetadata"); // original source loads again
+    await p;
+    assert(el.currentTime === 42 && el.plays >= 1, "playback not restored after revert");
+    assert(env.world.mediaSources.length === 0, "hooked a non-CORS element");
+    const again = await env.send({ type: "SS_CONTENT_APPLY", settings: boost, corsUnlock: true });
+    assert(again.value && !again.value.corsUnlockNeeded, "retries unlock forever");
+  });
+
+  await test("firefox bg: boost on CORS-blocked tab installs tab-scoped media rule", async () => {
+    const env = makeFirefoxBgEnv({
+      content: m => m.type === "SS_CONTENT_APPLY"
+        ? { ok: true, backend: "basic", canBoost: true, corsUnlockNeeded: true }
+        : { ok: true, backend: "media-element", canBoost: true }
+    });
+    const r = await env.send({ type: "SS_APPLY_SETTINGS", tabId: 7, settings: boost });
+    const add = env.ruleCalls.find(c => c.addRules);
+    assert(add, "no session rule added");
+    const rule = add.addRules[0];
+    assert(rule.id === 7 && rule.condition.tabIds[0] === 7 && rule.condition.resourceTypes.join() === "media", JSON.stringify(rule));
+    assert(rule.action.responseHeaders[0].header === "Access-Control-Allow-Origin", "wrong header");
+    assert(env.tabMessages.some(m => m.message.type === "SS_CONTENT_CORS_RELOAD"), "content not told to reload");
+    assert(r && r.mode === "media-element", "result=" + JSON.stringify(r));
+    assert(!/not available in Firefox/.test(r.reason || ""), "noise reason: " + r.reason);
+    env.onRemoved.fire(7, {});
+    await tick(5);
+    assert(env.ruleCalls.some(c => c.removeRuleIds && c.removeRuleIds[0] === 7 && !c.addRules), "rule not removed on tab close");
+  });
+
+  await test("firefox bg: no rule when content needs no unlock", async () => {
+    const env = makeFirefoxBgEnv({ content: () => ({ ok: true, backend: "media-element", canBoost: true }) });
+    await env.send({ type: "SS_APPLY_SETTINGS", tabId: 3, settings: boost });
+    assert(!env.ruleCalls.some(c => c.addRules), "rule added without need");
   });
 
   // ---------------- popup

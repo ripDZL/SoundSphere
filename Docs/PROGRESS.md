@@ -29,3 +29,7 @@
 - 1.3.1: manifests 1.3.1; font removed from web-accessible resources.
 - Added `tools/package-1.3.sh` and `tests/1.3/` harness; CI runs tests then packages 1.3 into `beta/`.
 - Verified: harness 25/25 (original 1.3: 2/25); Firefox `web-ext lint` 0/0/0; remote-code scan clean.
+- 1.3.2: Firefox off-DOM media tracking via play() hook (Spotify volume/mute now reach the player).
+- 1.3.2: Firefox CORS unlock (tab-scoped DNR session rule + CORS-mode reload) so Bandcamp/CDN media can boost.
+- 1.3.2: Firefox background per-tab queue; status no longer always says "Whole-tab capture is not available".
+- 1.3.2: harness 33/33 (1.3.1: 28/33); `web-ext lint` 0/0/0.

@@ -21,3 +21,12 @@
 - Open decision: per-tab volume memory (1.3) vs earlier per-site `vol_hosts` design (1.1.1/1.2.1).
 - Open tradeoff: Chrome keeps `<all_urls>` host permission + content script so list-switched tabs get fallback (tabCapture needs per-tab activeTab invocation).
 - Next step: manual test matrix in `Docs/TODO.md`.
+
+## 1.3.2 (2026-11-04)
+
+- Report on 1.3.1 (Firefox): YouTube OK; Bandcamp mute only, no boost; Spotify no effect.
+- Cause: Bandcamp media cross-origin without CORS (guard drops to basic); Spotify element not in DOM.
+- Fix: CORS unlock (DNR session rule per tab + reload) and off-DOM tracking via `exportFunction` play() hook.
+- Reference add-on studied only by listing (no public source, GPLv3); implementation is SoundSphere's own.
+- Unverified in real Firefox: DNR header + CORS reload on Bandcamp; exportFunction hook on Spotify.
+- Next step: manual Firefox test (Bandcamp boost, Spotify volume/mute, YouTube regression).
