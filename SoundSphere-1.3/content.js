@@ -10,9 +10,21 @@
 
   This script is still needed for Firefox and for Chrome pages where tabCapture is unavailable.
   It tries media-element WebAudio first, then falls back to basic 0-100 volume.
+
+  Two browser rules decide whether an element may be rerouted through WebAudio.
+  Breaking either one silences the element, so both are checked first:
+    - cross-origin media without CORS outputs silence from
+      createMediaElementSource (common on CDN-hosted audio such as Bandcamp)
+    - a suspended AudioContext (no page gesture yet) renders nothing
 */
 
 const EQ_BANDS_HZ = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+const CLIP_RANGE = 4;
+const CLIP_KNEE = 0.85;
+const CONTEXT_START_WAIT_MS = 300;
+const IS_TOP_FRAME = (() => {
+  try { return window.top === window; } catch { return false; }
+})();
 
 const drmState = {
   inUse: false,
@@ -50,19 +62,55 @@ function isMediaElement(node) {
   return node && node.nodeType === 1 && (node.tagName === "AUDIO" || node.tagName === "VIDEO");
 }
 
+// True when WebAudio may read the element's samples. Same-origin, blob: (MSE,
+// used by YouTube/Twitch), data:, MediaStream and CORS-enabled media qualify.
+// Elements with no source yet return false and are retried on "play".
+function isCorsReadable(el) {
+  try {
+    if (el.srcObject) return true;
+    if (el.crossOrigin === "anonymous" || el.crossOrigin === "use-credentials") return true;
+    const src = el.currentSrc || el.src || "";
+    if (!src) return false;
+    const url = new URL(src, document.baseURI);
+    if (url.protocol === "blob:" || url.protocol === "data:" || url.protocol === "mediastream:") return true;
+    return url.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function boostDb(settings) {
+  if (settings.muted) return 0;
+  const volumeDb = 20 * Math.log10(Math.max(settings.volume, 1) / 100);
+  const eqDb = Math.max(0, ...settings.eqGains);
+  const modeDb = settings.mode === "voice" ? 8 : settings.mode === "bass" ? 10 : 0;
+  return volumeDb + eqDb + modeDb;
+}
+
+function makeSoftClipCurve() {
+  const samples = 8193;
+  const curve = new Float32Array(samples);
+  const span = 1 - CLIP_KNEE;
+  for (let i = 0; i < samples; i++) {
+    const x = ((i / (samples - 1)) * 2 - 1) * CLIP_RANGE;
+    const ax = Math.abs(x);
+    const y = ax <= CLIP_KNEE ? ax : CLIP_KNEE + span * Math.tanh((ax - CLIP_KNEE) / span);
+    curve[i] = Math.sign(x) * y;
+  }
+  return curve;
+}
+
 function markDrm(kind) {
   drmState.inUse = true;
   if (kind === "encrypted") drmState.encryptedEvent = true;
   if (kind === "mediaKeys") drmState.mediaKeys = true;
 }
 
+// "encrypted" events are caught by the document-level capture listener below,
+// so per-element listeners (previously re-added on every scan) are unneeded.
 function watchForDrm(el) {
   try {
     if (el.mediaKeys) markDrm("mediaKeys");
-  } catch {}
-
-  try {
-    el.addEventListener("encrypted", () => markDrm("encrypted"), { once: true, passive: true });
   } catch {}
 }
 
@@ -122,15 +170,39 @@ window.addEventListener("message", event => {
 });
 
 class AudioBus {
-  constructor() {
+  constructor(onRunning) {
     this.ctx = null;
     this.input = null;
     this.gain = null;
     this.modeFilter = null;
     this.eq = [];
     this.compressor = null;
+    this.clipInput = null;
     this.shaper = null;
     this.output = null;
+    this.onRunning = onRunning;
+  }
+
+  isRunning() {
+    return !!this.ctx && this.ctx.state === "running";
+  }
+
+  // Resolves true once the context runs, false after timeoutMs. A fresh
+  // context reports "suspended" until the browser lets it start.
+  waitForRunning(timeoutMs) {
+    if (!this.ctx) return Promise.resolve(false);
+    if (this.isRunning()) return Promise.resolve(true);
+    this.resume();
+    return new Promise(resolve => {
+      const done = value => {
+        clearTimeout(timer);
+        this.ctx.removeEventListener("statechange", onChange);
+        resolve(value);
+      };
+      const onChange = () => { if (this.isRunning()) done(true); };
+      const timer = setTimeout(() => done(this.isRunning()), timeoutMs);
+      this.ctx.addEventListener("statechange", onChange);
+    });
   }
 
   ensure() {
@@ -139,6 +211,9 @@ class AudioBus {
     if (!AudioContextClass) return false;
 
     this.ctx = new AudioContextClass();
+    this.ctx.addEventListener("statechange", () => {
+      if (this.isRunning() && this.onRunning) this.onRunning();
+    });
     this.input = this.ctx.createGain();
     this.gain = this.ctx.createGain();
     this.modeFilter = this.ctx.createBiquadFilter();
@@ -151,15 +226,19 @@ class AudioBus {
       return node;
     });
 
+    // Ratio stays at 1 (transparent) until settings boost; see apply().
     this.compressor = this.ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -8;
     this.compressor.knee.value = 18;
-    this.compressor.ratio.value = 4;
+    this.compressor.ratio.value = 1;
     this.compressor.attack.value = 0.003;
     this.compressor.release.value = 0.25;
 
+    // WaveShaper maps [-1, 1]; the pre-gain lets the curve cover +12 dBFS.
+    this.clipInput = this.ctx.createGain();
+    this.clipInput.gain.value = 1 / CLIP_RANGE;
     this.shaper = this.ctx.createWaveShaper();
-    this.shaper.curve = AudioBus.makeSoftClipCurve();
+    this.shaper.curve = makeSoftClipCurve();
     this.shaper.oversample = "2x";
 
     this.output = this.ctx.createGain();
@@ -171,7 +250,8 @@ class AudioBus {
       tail = node;
     }
     tail.connect(this.compressor);
-    this.compressor.connect(this.shaper);
+    this.compressor.connect(this.clipInput);
+    this.clipInput.connect(this.shaper);
     this.shaper.connect(this.output);
     this.output.connect(this.ctx.destination);
 
@@ -179,16 +259,6 @@ class AudioBus {
     window.addEventListener("pointerdown", resume, { passive: true });
     window.addEventListener("keydown", resume, { passive: true });
     return true;
-  }
-
-  static makeSoftClipCurve() {
-    const samples = 4096;
-    const curve = new Float32Array(samples);
-    for (let index = 0; index < samples; index++) {
-      const x = (index / (samples - 1)) * 2 - 1;
-      curve[index] = x / (1 + 0.65 * Math.abs(x));
-    }
-    return curve;
   }
 
   resume() {
@@ -223,7 +293,17 @@ class AudioBus {
     this.eq.forEach((node, index) => {
       node.gain.setTargetAtTime(settings.eqGains[index] || 0, t, 0.015);
     });
+    const amount = Math.max(0, Math.min(1, boostDb(settings) / 6));
+    this.compressor.ratio.setTargetAtTime(1 + 3 * amount, t, 0.05);
     this.resume();
+  }
+}
+
+function mediaElements() {
+  try {
+    return Array.from(document.querySelectorAll("audio,video"));
+  } catch {
+    return [];
   }
 }
 
@@ -234,150 +314,200 @@ class MediaHook {
     this.hookedCount = 0;
   }
 
-  hook(el) {
-    if (!isMediaElement(el)) return false;
+  isHooked(el) {
+    return this.sources.has(el);
+  }
+
+  // Could be rerouted through WebAudio without going silent (once running).
+  canHook(el) {
+    if (!isMediaElement(el) || this.sources.has(el)) return false;
     watchForDrm(el);
     if (drmState.inUse) return false;
+    return isCorsReadable(el);
+  }
+
+  hook(el) {
     if (this.sources.has(el)) return true;
+    if (!this.canHook(el)) return false;
     if (!this.bus.ensure()) return false;
+
+    // createMediaElementSource is irreversible; rerouting into a context that
+    // is not running yet would silence the element. Retry on statechange.
+    if (!this.bus.isRunning()) {
+      this.bus.resume();
+      return false;
+    }
 
     try {
       const source = this.bus.ctx.createMediaElementSource(el);
       source.connect(this.bus.input);
       this.sources.set(el, source);
       this.hookedCount += 1;
-      el.volume = 1;
       return true;
     } catch {
       return false;
     }
   }
 
-  scan(root = document) {
-    try {
-      if (isMediaElement(root)) this.hook(root);
-      const list = root.querySelectorAll ? root.querySelectorAll("audio,video") : [];
-      for (const el of list) this.hook(el);
-    } catch {}
+  hookAll() {
+    let hooked = false;
+    for (const el of mediaElements()) {
+      if (this.hook(el)) hooked = true;
+    }
+    return hooked;
+  }
+
+  hasCandidates() {
+    return mediaElements().some(el => this.canHook(el));
   }
 }
 
 class SoundSphereContentController {
   constructor() {
-    this.bus = new AudioBus();
+    this.bus = new AudioBus(() => this.onContextRunning());
     this.hook = new MediaHook(this.bus);
     this.settings = normalizeSettings({});
     this.started = false;
-    this.observer = null;
+    this.active = false;
     this.backend = "basic";
+    // Element state SoundSphere changed, so it can be handed back untouched.
+    this.originalVolume = new WeakMap();
+    this.mutedByUs = new WeakSet();
   }
 
   start() {
     if (this.started) return;
     this.started = true;
     injectWebAudioTap();
-    pingTap();
-    this.installObservers();
-    this.scan();
+    // Media created later is picked up when it starts playing. A subtree
+    // MutationObserver (previous approach) cost a querySelectorAll per DOM
+    // insertion on busy pages and caught nothing "play" does not.
+    document.addEventListener("play", event => this.onPlay(event.target), true);
   }
 
-  installObservers() {
-    document.addEventListener("play", event => {
-      if (isMediaElement(event.target)) {
-        this.hook.hook(event.target);
-        this.apply(this.settings);
-      }
-    }, true);
+  hasMedia() {
+    return mediaElements().length > 0 || this.hook.hookedCount > 0;
+  }
 
-    this.observer = new MutationObserver(mutations => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes || []) {
-          if (isMediaElement(node) || (node && node.querySelectorAll)) {
-            this.hook.scan(node);
-          }
-        }
-      }
-    });
+  onPlay(el) {
+    if (!this.active || !isMediaElement(el)) return;
+    this.hook.hook(el);
+    this.applyNow();
+  }
 
+  onContextRunning() {
+    if (!this.active) return;
+    if (this.hook.hookAll()) this.applyNow();
+  }
+
+  restoreElement(el) {
+    if (this.originalVolume.has(el)) {
+      try { el.volume = this.originalVolume.get(el); } catch {}
+      this.originalVolume.delete(el);
+    }
+    if (this.mutedByUs.has(el)) {
+      try { el.muted = false; } catch {}
+      this.mutedByUs.delete(el);
+    }
+  }
+
+  // Basic mode: scale relative to the player's own volume and never above it,
+  // so falling back can't make a page suddenly louder.
+  applyBasicTo(el, settings) {
     try {
-      this.observer.observe(document.documentElement || document, {
-        childList: true,
-        subtree: true
-      });
+      if (!this.originalVolume.has(el)) this.originalVolume.set(el, el.volume);
+      const base = this.originalVolume.get(el);
+      el.volume = Math.max(0, Math.min(1, base * Math.min(1, settings.volume / 100)));
+
+      if (settings.muted || settings.volume <= 0) {
+        if (!el.muted) {
+          el.muted = true;
+          this.mutedByUs.add(el);
+        }
+      } else if (this.mutedByUs.has(el)) {
+        el.muted = false;
+        this.mutedByUs.delete(el);
+      }
     } catch {}
   }
 
-  scan() {
-    this.hook.scan();
-    for (const el of document.querySelectorAll("audio,video")) watchForDrm(el);
-  }
-
-  applyBasic(settings) {
-    const volume = clamp(settings.volume, 0, 100) / 100;
-    for (const el of document.querySelectorAll("audio,video")) {
-      try { el.muted = settings.muted || settings.volume <= 0; } catch {}
-      try { el.volume = settings.muted ? 0 : volume; } catch {}
+  syncElements(settings) {
+    for (const el of mediaElements()) {
+      watchForDrm(el);
+      // Hooked elements are boosted in WebAudio; give the player its volume back.
+      if (this.hook.isHooked(el)) this.restoreElement(el);
+      else this.applyBasicTo(el, settings);
     }
   }
 
-  applyProtectedBasic(settings) {
-    const safeSettings = normalizeSettings({
-      volume: clamp(settings.volume, 0, 100),
-      muted: settings.muted,
-      mode: "default",
-      eqGains: new Array(10).fill(0)
-    });
-
-    if (this.hook.hookedCount > 0) {
-      this.bus.apply(safeSettings);
-    }
-    this.applyBasic(safeSettings);
-  }
-
-  apply(settings) {
+  async apply(settings) {
     this.settings = normalizeSettings(settings);
+    this.active = true;
     this.start();
-    injectWebAudioTap();
     pingTap();
-    this.scan();
+    this.hook.hookAll();
 
-    if (drmState.inUse) {
-      this.applyProtectedBasic(this.settings);
-      this.backend = "protected-basic";
-      return this.status();
+    // A new AudioContext starts "suspended" and switches to "running" shortly
+    // after (or only after a page gesture). Wait briefly before deciding.
+    if (!drmState.inUse && this.hook.hasCandidates() && !this.bus.isRunning()) {
+      if (await this.bus.waitForRunning(CONTEXT_START_WAIT_MS)) this.hook.hookAll();
     }
+    return this.applyNow();
+  }
 
-    if (!drmState.inUse && this.hook.hookedCount > 0) {
-      this.bus.apply(this.settings);
-      this.backend = "media-element";
-      return this.status();
-    }
+  applyNow() {
+    const settings = drmState.inUse
+      ? normalizeSettings({
+        volume: clamp(this.settings.volume, 0, 100),
+        muted: this.settings.muted,
+        mode: "default",
+        eqGains: []
+      })
+      : this.settings;
 
-    if (!drmState.inUse && tapState.ready) {
-      postTapSettings(this.settings);
-      this.backend = "page-webaudio";
-      return this.status();
-    }
+    if (this.hook.hookedCount > 0) this.bus.apply(settings);
+    postTapSettings(settings);
+    this.syncElements(settings);
 
-    this.applyBasic(this.settings);
-    this.backend = drmState.inUse ? "protected-basic" : "basic";
+    if (drmState.inUse) this.backend = "protected-basic";
+    else if (this.hook.hookedCount > 0) this.backend = "media-element";
+    else if (tapState.contexts > 0) this.backend = "page-webaudio";
+    else this.backend = "basic";
     return this.status();
   }
 
   reset() {
-    this.apply(normalizeSettings({ volume: 100, mode: "default", eqGains: new Array(10).fill(0) }));
+    if (!this.started) return;
+    this.active = false;
+    this.settings = normalizeSettings({});
+    if (this.hook.hookedCount > 0) this.bus.apply(this.settings);
+    postTapSettings(this.settings);
+    for (const el of mediaElements()) this.restoreElement(el);
+    this.backend = "basic";
   }
 
   status() {
-    const canBoost = !drmState.inUse && (this.hook.hookedCount > 0 || tapState.ready);
-    const reason = drmState.inUse
-      ? "Protected playback detected. Basic 0-100 volume is available, but EQ and boost are blocked by the browser/site."
-      : (canBoost ? "" : "Using basic 0-100 media element volume until WebAudio can attach.");
+    // Before the first apply nothing is hooked yet, so report what *can* be
+    // boosted (CORS-readable media present) rather than what already is.
+    const canBoost = !drmState.inUse &&
+      (this.hook.hookedCount > 0 || tapState.contexts > 0 || this.hook.hasCandidates());
+
+    let reason = "";
+    if (drmState.inUse) {
+      reason = "Protected playback detected. Basic 0-100 volume only.";
+    } else if (!canBoost) {
+      reason = this.hasMedia()
+        ? "This player's audio can't be processed here. Basic 0-100 volume only."
+        : "No media found yet. Basic 0-100 volume only.";
+    } else if (this.active && this.hook.hookedCount === 0 && tapState.contexts === 0 && !this.bus.isRunning()) {
+      reason = "Click the page once to enable boost and EQ.";
+    }
 
     return {
       ok: true,
       backend: this.backend,
       canBoost,
+      engaged: this.active,
       hooked: this.hook.hookedCount,
       contextState: this.bus.ctx ? this.bus.ctx.state : "none",
       tapReady: tapState.ready,
@@ -390,23 +520,46 @@ class SoundSphereContentController {
 
 const controller = new SoundSphereContentController();
 
+// The background broadcasts to every frame of the tab and keeps the first
+// answer. Frames with media answer at once; the top frame answers last as a
+// fallback; other frames (ads, widgets) stay silent so they can't report a
+// misleading "basic" status for the whole tab.
+// Media frames answer APPLY after at most CONTEXT_START_WAIT_MS and STATUS
+// synchronously, so the media-less top frame waits just past those.
+const TOP_FRAME_APPLY_DELAY_MS = CONTEXT_START_WAIT_MS + 100;
+const TOP_FRAME_STATUS_DELAY_MS = 60;
+
+function isRelevantFrame() {
+  return controller.hasMedia() || tapState.contexts > 0;
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") return undefined;
 
   if (message.type === "SS_CONTENT_APPLY") {
-    sendResponse(controller.apply(message.settings));
-    return undefined;
+    const relevant = isRelevantFrame();
+    const pending = controller.apply(message.settings);
+    if (!relevant && !IS_TOP_FRAME) return undefined; // apply silently
+    pending.then(result => {
+      if (relevant) sendResponse(result);
+      else setTimeout(() => sendResponse(controller.status()), TOP_FRAME_APPLY_DELAY_MS);
+    });
+    return true;
   }
 
   if (message.type === "SS_CONTENT_STATUS") {
-    controller.start();
-    sendResponse(controller.status());
-    return undefined;
+    if (isRelevantFrame()) {
+      sendResponse(controller.status());
+      return undefined;
+    }
+    if (!IS_TOP_FRAME) return undefined;
+    setTimeout(() => sendResponse(controller.status()), TOP_FRAME_STATUS_DELAY_MS);
+    return true;
   }
 
   if (message.type === "SS_CONTENT_RESET") {
     controller.reset();
-    sendResponse({ ok: true });
+    if (IS_TOP_FRAME) sendResponse({ ok: true });
     return undefined;
   }
 

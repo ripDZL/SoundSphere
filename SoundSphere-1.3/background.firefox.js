@@ -34,9 +34,23 @@ function tabsQuery(queryInfo) {
   return withCallback(chrome.tabs.query, chrome.tabs, queryInfo).catch(() => []);
 }
 
+const TAB_MESSAGE_TIMEOUT_MS = 2000;
+
+// Bounded so a page that never answers can't leave the popup waiting.
 function sendTabMessage(tabId, message) {
-  return withCallback(chrome.tabs.sendMessage, chrome.tabs, tabId, message)
+  const reply = withCallback(chrome.tabs.sendMessage, chrome.tabs, tabId, message)
     .catch(error => ({ ok: false, error: error.message || String(error) }));
+  const timeout = new Promise(resolve => {
+    setTimeout(() => resolve({ ok: false, error: "Page did not respond" }), TAB_MESSAGE_TIMEOUT_MS);
+  });
+  return Promise.race([reply, timeout]);
+}
+
+// Control messages must come from SoundSphere's own pages (popup/options),
+// never from a content script running inside a web page.
+function isExtensionPageSender(sender) {
+  const base = chrome.runtime.getURL("");
+  return Boolean(sender && sender.url && sender.url.startsWith(base));
 }
 
 function storageGet(defaults) {
@@ -104,6 +118,7 @@ async function getStatus(tabId) {
       canBoost: !!content.canBoost,
       advanced: !!content.canBoost,
       captureActive: false,
+      engaged: !!content.engaged,
       reason: content.reason || ""
     };
   }
@@ -157,11 +172,22 @@ async function cleanupStoredTabVolume(tabId) {
   await storageLocalSet({ vol_tabs: volumes });
 }
 
+// Tab ids are only unique within one browser session and restart after a
+// relaunch, so remembered per-tab volumes from a previous session would land
+// on unrelated new tabs. Clear them whenever the browser starts.
+function clearSessionTabVolumes() {
+  return storageLocalSet({ vol_tabs: {} });
+}
+
 chrome.runtime.onInstalled.addListener(details => {
   if (details.reason === "install" || details.reason === "update") {
     purgeLegacyTabVolumeKeys();
   }
 });
+
+if (chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => clearSessionTabVolumes());
+}
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
   if ("audible" in changeInfo) refreshBadge();
@@ -182,8 +208,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return undefined;
+  if (!isExtensionPageSender(sender)) return undefined;
 
   if (message.type === "SS_GET_STATUS") {
     getStatus(message.tabId).then(sendResponse);

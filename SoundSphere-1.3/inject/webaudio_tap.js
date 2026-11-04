@@ -20,6 +20,8 @@
   window[LEGACY_FLAG] = true;
 
   const EQ_BANDS_HZ = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+  const CLIP_RANGE = 4;
+  const CLIP_KNEE = 0.85;
 
   const BYPASS = Symbol("ss_bypass_connect");
 
@@ -40,14 +42,28 @@
     return Math.max(min, Math.min(max, v));
   }
 
+  // Identity below CLIP_KNEE, tanh knee approaching 1.0 above. Fed through a
+  // 1/CLIP_RANGE pre-gain so the curve covers inputs up to +12 dBFS.
   function makeSoftClipCurve() {
-    const N = 2048;
+    const N = 8193;
     const curve = new Float32Array(N);
+    const span = 1 - CLIP_KNEE;
     for (let i = 0; i < N; i++) {
-      const x = (i / (N - 1)) * 2 - 1;
-      curve[i] = x / (1 + 0.65 * Math.abs(x));
+      const x = ((i / (N - 1)) * 2 - 1) * CLIP_RANGE;
+      const ax = Math.abs(x);
+      const y = ax <= CLIP_KNEE ? ax : CLIP_KNEE + span * Math.tanh((ax - CLIP_KNEE) / span);
+      curve[i] = Math.sign(x) * y;
     }
     return curve;
+  }
+
+  // Compressor engages only while boosting so neutral settings stay transparent.
+  function boostDb() {
+    if (state.muted) return 0;
+    const volumeDb = 20 * Math.log10(Math.max(state.volumePercent, 1) / 100);
+    const eqDb = Math.max(0, ...state.eq);
+    const modeDb = state.mode === "voice" ? 8 : state.mode === "bass" ? 10 : 0;
+    return volumeDb + eqDb + modeDb;
   }
 
   function buildChain(ctx) {
@@ -73,11 +89,13 @@
     try {
       compressor.threshold.value = -8;
       compressor.knee.value = 18;
-      compressor.ratio.value = 3.5;
+      compressor.ratio.value = 1;
       compressor.attack.value = 0.003;
       compressor.release.value = 0.25;
     } catch {}
 
+    const clipInput = ctx.createGain();
+    clipInput.gain.value = 1 / CLIP_RANGE;
     const shaper = ctx.createWaveShaper();
     shaper.curve = makeSoftClipCurve();
     shaper.oversample = "2x";
@@ -85,7 +103,7 @@
     const output = ctx.createGain();
     output.gain.value = 1;
 
-    // Wire: input -> gain -> modeIn -> modeOut -> eq -> comp -> shaper -> output
+    // Wire: input -> gain -> modeIn -> modeOut -> eq -> comp -> clipInput -> shaper -> output
     input.connect(gain);
     gain.connect(modeIn);
 
@@ -95,7 +113,8 @@
       tail = b;
     }
     tail.connect(compressor);
-    compressor.connect(shaper);
+    compressor.connect(clipInput);
+    clipInput.connect(shaper);
     shaper.connect(output);
 
     // Connect output to destination, but mark output as bypass so our connect
@@ -113,8 +132,10 @@
       mode: { in: modeIn, out: modeOut },
       eq,
       compressor,
+      clipInput,
       shaper,
       output,
+      currentMode: null,
       connected: false
     };
 
@@ -174,12 +195,19 @@
   function applySettings(chain) {
     if (!chain || !chain.ctx) return;
 
-    // Gain
+    // Gain (short ramp avoids zipper noise while dragging)
     const g = state.muted ? 0 : clamp(state.volumePercent, 0, 800) / 100;
     try {
-      chain.gain.gain.setValueAtTime(g, chain.ctx.currentTime);
+      chain.gain.gain.setTargetAtTime(g, chain.ctx.currentTime, 0.012);
     } catch {
       chain.gain.gain.value = g;
+    }
+
+    const ratio = 1 + 3 * Math.max(0, Math.min(1, boostDb() / 6));
+    try {
+      chain.compressor.ratio.setTargetAtTime(ratio, chain.ctx.currentTime, 0.05);
+    } catch {
+      chain.compressor.ratio.value = ratio;
     }
 
     // EQ
@@ -192,8 +220,12 @@
       }
     }
 
-    // Mode
-    applyMode(chain, state.mode);
+    // Mode: rebuilding the segment on every slider move allocated nodes and
+    // clicked; only rebuild when the mode actually changes.
+    if (chain.currentMode !== state.mode) {
+      applyMode(chain, state.mode);
+      chain.currentMode = state.mode;
+    }
   }
 
   function getChainFor(ctx) {
@@ -214,6 +246,9 @@
   // Patch connect
   const NativeAudioNode = window.AudioNode;
   const nativeConnect = NativeAudioNode && NativeAudioNode.prototype && NativeAudioNode.prototype.connect;
+  const nativeDisconnect = NativeAudioNode && NativeAudioNode.prototype && NativeAudioNode.prototype.disconnect;
+  // Nodes whose destination connection was redirected into a master chain.
+  const rerouted = new WeakSet();
 
   function isAudioParam(x) {
     // AudioParam doesn't reliably expose a public class name.
@@ -246,6 +281,7 @@
 
             // Route source into master input.
             nativeConnect.call(this, chain.input);
+            rerouted.add(this);
             return dest;
           }
         }
@@ -254,6 +290,28 @@
       }
 
       return nativeConnect.apply(this, args);
+    };
+  }
+
+  // The page believes its node is wired to ctx.destination. Without this,
+  // disconnect(ctx.destination) threw InvalidAccessError and broke the page.
+  if (nativeConnect && nativeDisconnect) {
+    NativeAudioNode.prototype.disconnect = function (...args) {
+      try {
+        const dest = args[0];
+        const ctx = this && this.context;
+        if (ctx && dest === ctx.destination && rerouted.has(this)) {
+          const chain = chains.get(ctx);
+          if (chain && chain.input) {
+            try { nativeDisconnect.call(this, chain.input); } catch {}
+            rerouted.delete(this);
+            return undefined;
+          }
+        }
+      } catch {
+        // Fall through to native behavior.
+      }
+      return nativeDisconnect.apply(this, args);
     };
   }
 

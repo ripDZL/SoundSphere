@@ -19,6 +19,36 @@ const OFFSCREEN_URL = chrome.runtime.getURL(OFFSCREEN_PATH);
 
 let showBadge = true;
 let creatingOffscreen = null;
+let closingOffscreen = null;
+let idleCloseTimer = null;
+
+// Close the offscreen document this long after the last capture ends, so an
+// idle browser holds no hidden audio renderer.
+const OFFSCREEN_IDLE_CLOSE_MS = 15000;
+
+// Per-tab task queue. The popup can fire several applies while the first
+// capture is still starting (getUserMedia takes ~50-300 ms). Without ordering,
+// each one saw "no capture yet" and requested its own stream, which built
+// duplicate graphs (double audio) or failed into the content fallback.
+const tabQueues = new Map();
+
+function runForTab(tabId, task) {
+  const key = String(tabId);
+  const previous = tabQueues.get(key) || Promise.resolve();
+  const next = previous.catch(() => {}).then(task);
+  tabQueues.set(key, next);
+  next.finally(() => {
+    if (tabQueues.get(key) === next) tabQueues.delete(key);
+  }).catch(() => {});
+  return next;
+}
+
+// Control messages must come from SoundSphere's own pages (popup/options),
+// never from a content script running inside a web page.
+function isExtensionPageSender(sender) {
+  const base = chrome.runtime.getURL("");
+  return Boolean(sender && sender.url && sender.url.startsWith(base));
+}
 
 function runtimeLastError() {
   const err = chrome.runtime && chrome.runtime.lastError;
@@ -47,9 +77,16 @@ function tabsGet(tabId) {
   return withCallback(chrome.tabs.get, chrome.tabs, tabId).catch(() => null);
 }
 
+const TAB_MESSAGE_TIMEOUT_MS = 2000;
+
+// Bounded so a page that never answers can't stall the per-tab queue.
 function sendTabMessage(tabId, message) {
-  return withCallback(chrome.tabs.sendMessage, chrome.tabs, tabId, message)
+  const reply = withCallback(chrome.tabs.sendMessage, chrome.tabs, tabId, message)
     .catch(error => ({ ok: false, error: error.message || String(error) }));
+  const timeout = new Promise(resolve => {
+    setTimeout(() => resolve({ ok: false, error: "Page did not respond" }), TAB_MESSAGE_TIMEOUT_MS);
+  });
+  return Promise.race([reply, timeout]);
 }
 
 function runtimeSendMessage(message) {
@@ -114,6 +151,8 @@ async function ensureOffscreenDocument() {
     throw new Error("tabCapture/offscreen is unavailable in this browser");
   }
 
+  clearTimeout(idleCloseTimer);
+  if (closingOffscreen) await closingOffscreen;
   if (await hasOffscreenDocument()) return;
 
   if (!creatingOffscreen) {
@@ -151,6 +190,38 @@ async function sendToOffscreen(message, retries = 2) {
   throw lastError || new Error("Offscreen document did not respond");
 }
 
+// Query/stop helpers must not spin up an offscreen document just to learn that
+// nothing is playing (e.g. on every tab close).
+async function sendToOffscreenIfPresent(message) {
+  if (!canUseChromeTabCapture()) return null;
+  if (closingOffscreen) return null;
+  if (!(await hasOffscreenDocument())) return null;
+  try {
+    return await runtimeSendMessage({ ...message, target: "offscreen" });
+  } catch {
+    return null;
+  }
+}
+
+function scheduleOffscreenIdleClose() {
+  clearTimeout(idleCloseTimer);
+  idleCloseTimer = setTimeout(closeOffscreenIfIdle, OFFSCREEN_IDLE_CLOSE_MS);
+}
+
+async function closeOffscreenIfIdle() {
+  if (tabQueues.size > 0 || creatingOffscreen || closingOffscreen) return;
+  if (!chrome.offscreen || typeof chrome.offscreen.closeDocument !== "function") return;
+
+  const info = await sendToOffscreenIfPresent({ type: "SS_OFFSCREEN_COUNT" });
+  if (!info || !info.ok || info.count !== 0) return;
+  if (tabQueues.size > 0 || creatingOffscreen) return;
+
+  closingOffscreen = chrome.offscreen.closeDocument()
+    .catch(() => {})
+    .finally(() => { closingOffscreen = null; });
+  await closingOffscreen;
+}
+
 async function getMediaStreamId(tabId) {
   if (!chrome.tabCapture || typeof chrome.tabCapture.getMediaStreamId !== "function") {
     throw new Error("tabCapture is unavailable");
@@ -177,12 +248,19 @@ async function startOrUpdateChromeCapture(tabId, settings) {
   const streamId = await getMediaStreamId(tabId);
   if (!streamId) throw new Error("Chrome did not grant a tab audio stream");
 
-  return sendToOffscreen({
+  const started = await sendToOffscreen({
     type: "SS_OFFSCREEN_START",
     tabId,
     streamId,
     settings
   });
+
+  // If this tab was previously handled by the content fallback, neutralize it
+  // now that whole-tab capture owns the audio; otherwise boost/EQ stack twice.
+  if (started && started.ok) {
+    await sendTabMessage(tabId, { type: "SS_CONTENT_RESET" });
+  }
+  return started;
 }
 
 async function applyContentFallback(tabId, settings, reason) {
@@ -211,11 +289,14 @@ async function applyContentFallback(tabId, settings, reason) {
   };
 }
 
-async function applySettings(tabId, settings) {
+function applySettings(tabId, settings) {
   if (!tabId) {
-    return { ok: false, mode: "unsupported", canBoost: false, reason: "No active tab" };
+    return Promise.resolve({ ok: false, mode: "unsupported", canBoost: false, reason: "No active tab" });
   }
+  return runForTab(tabId, () => applySettingsNow(tabId, settings));
+}
 
+async function applySettingsNow(tabId, settings) {
   if (canUseChromeTabCapture()) {
     try {
       const response = await startOrUpdateChromeCapture(tabId, settings);
@@ -238,16 +319,31 @@ async function getStatus(tabId) {
   }
 
   if (canUseChromeTabCapture()) {
-    const offscreen = (await hasOffscreenDocument())
-      ? await sendToOffscreen({ type: "SS_OFFSCREEN_STATUS", tabId }).catch(() => null)
-      : null;
+    const tab = await tabsGet(tabId);
+    if (!tab || isRestrictedUrl(tab.url)) {
+      return {
+        ok: false,
+        mode: "unsupported",
+        canBoost: false,
+        advanced: false,
+        captureActive: false,
+        engaged: false,
+        reason: "Browser pages cannot be controlled"
+      };
+    }
+
+    const offscreen = await sendToOffscreenIfPresent({ type: "SS_OFFSCREEN_STATUS", tabId });
+    const captureActive = !!(offscreen && offscreen.active);
+    const content = captureActive ? null : await sendTabMessage(tabId, { type: "SS_CONTENT_STATUS" });
+    const fallbackEngaged = !!(content && content.ok !== false && content.engaged);
     return {
       ok: true,
-      mode: offscreen && offscreen.active ? "whole-tab" : "ready",
-      canBoost: true,
-      advanced: true,
-      captureActive: !!(offscreen && offscreen.active),
-      reason: ""
+      mode: captureActive ? "whole-tab" : (fallbackEngaged ? (content.backend || "basic") : "ready"),
+      canBoost: fallbackEngaged ? !!content.canBoost : true,
+      advanced: fallbackEngaged ? !!content.canBoost : true,
+      captureActive,
+      engaged: captureActive || fallbackEngaged,
+      reason: fallbackEngaged ? (content.reason || "") : ""
     };
   }
 
@@ -259,6 +355,7 @@ async function getStatus(tabId) {
       canBoost: !!content.canBoost,
       advanced: !!content.canBoost,
       captureActive: false,
+      engaged: !!content.engaged,
       reason: content.reason || ""
     };
   }
@@ -273,12 +370,13 @@ async function getStatus(tabId) {
   };
 }
 
-async function stopTab(tabId) {
-  if (canUseChromeTabCapture()) {
-    await sendToOffscreen({ type: "SS_OFFSCREEN_STOP", tabId }).catch(() => {});
-  }
-  await sendTabMessage(tabId, { type: "SS_CONTENT_RESET" }).catch(() => {});
-  return { ok: true };
+function stopTab(tabId) {
+  return runForTab(tabId, async () => {
+    await sendToOffscreenIfPresent({ type: "SS_OFFSCREEN_STOP", tabId });
+    await sendTabMessage(tabId, { type: "SS_CONTENT_RESET" });
+    scheduleOffscreenIdleClose();
+    return { ok: true };
+  });
 }
 
 async function refreshBadge() {
@@ -315,11 +413,22 @@ async function cleanupStoredTabVolume(tabId) {
   await storageLocalSet({ vol_tabs: volumes });
 }
 
+// Tab ids are only unique within one browser session and restart after a
+// relaunch, so remembered per-tab volumes from a previous session would land
+// on unrelated new tabs. Clear them whenever the browser starts.
+function clearSessionTabVolumes() {
+  return storageLocalSet({ vol_tabs: {} });
+}
+
 chrome.runtime.onInstalled.addListener(details => {
   if (details.reason === "install" || details.reason === "update") {
     purgeLegacyTabVolumeKeys();
   }
 });
+
+if (chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => clearSessionTabVolumes());
+}
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
   if ("audible" in changeInfo) refreshBadge();
@@ -330,9 +439,10 @@ chrome.tabs.onActivated.addListener(() => refreshBadge());
 chrome.tabs.onRemoved.addListener(tabId => {
   refreshBadge();
   cleanupStoredTabVolume(tabId);
-  if (canUseChromeTabCapture()) {
-    sendToOffscreen({ type: "SS_OFFSCREEN_STOP", tabId }).catch(() => {});
-  }
+  runForTab(tabId, async () => {
+    const stopped = await sendToOffscreenIfPresent({ type: "SS_OFFSCREEN_STOP", tabId });
+    if (stopped) scheduleOffscreenIdleClose();
+  });
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -343,8 +453,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return undefined;
+  if (message.target === "offscreen") return undefined;
+  if (!isExtensionPageSender(sender)) return undefined;
 
   if (message.type === "SS_GET_STATUS") {
     getStatus(message.tabId).then(sendResponse);

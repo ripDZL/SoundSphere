@@ -17,6 +17,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test SoundSphere 1.3 (regression harness)
+        if: hashFiles('tests/1.3/test.js') != ''
+        run: node tests/1.3/test.js
+
       - name: Package builds (Chrome .zip + Firefox .xpi)
         run: |
           set -euo pipefail
@@ -30,6 +34,10 @@ jobs:
             v=$(echo "$d" | cut -d/ -f2)
             (cd "$d" && zip -rq "$GITHUB_WORKSPACE/beta/SoundSphere-firefox-${v}.xpi" . -x "*.DS_Store")
           done
+          # Unified 1.3 package: one source folder, two manifests.
+          if [ -d SoundSphere-1.3 ]; then
+            bash tools/package-1.3.sh beta
+          fi
           ls -l beta
 
       - name: Commit builds to beta/

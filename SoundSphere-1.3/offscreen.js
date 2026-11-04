@@ -8,10 +8,16 @@
 
   Captured tab audio is muted by Chrome unless this document plays the stream
   back to the user, so every active graph ends at AudioContext.destination.
+
+  At neutral settings (100%, flat EQ, default mode) the chain is transparent:
+  the compressor ratio sits at 1 and the soft clip is identity below its knee.
 */
 
 const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+const CLIP_RANGE = 4;    // soft clip handles inputs up to +12 dBFS
+const CLIP_KNEE = 0.85;  // identity below this amplitude
 const engines = new Map();
+const startTokens = new Map(); // tabId -> token of the newest start request
 
 function clamp(value, min, max) {
   const number = Number(value);
@@ -32,14 +38,38 @@ function normalizeSettings(settings) {
   };
 }
 
+// WaveShaper only maps inputs in [-1, 1], so the shaper is fed through a
+// 1/CLIP_RANGE pre-gain and the curve is evaluated over the real range.
+// Identity below CLIP_KNEE, then a tanh knee that approaches 1.0 (never clips
+// hard). The previous x/(1+0.65|x|) curve attenuated and distorted every
+// sample, even at 100%.
 function makeSoftClipCurve() {
-  const samples = 4096;
+  const samples = 8193;
   const curve = new Float32Array(samples);
+  const span = 1 - CLIP_KNEE;
   for (let i = 0; i < samples; i++) {
-    const x = (i / (samples - 1)) * 2 - 1;
-    curve[i] = x / (1 + 0.65 * Math.abs(x));
+    const x = ((i / (samples - 1)) * 2 - 1) * CLIP_RANGE;
+    const ax = Math.abs(x);
+    const y = ax <= CLIP_KNEE ? ax : CLIP_KNEE + span * Math.tanh((ax - CLIP_KNEE) / span);
+    curve[i] = Math.sign(x) * y;
   }
   return curve;
+}
+
+// Rough peak gain (dB) the settings add. The compressor only engages while
+// boosting; its ratio fades in over the first 6 dB so there is no jump in
+// loudness (DynamicsCompressor applies automatic makeup gain when ratio > 1).
+function boostDb(settings) {
+  if (settings.muted) return 0;
+  const volumeDb = 20 * Math.log10(Math.max(settings.volume, 1) / 100);
+  const eqDb = Math.max(0, ...settings.eqGains);
+  const modeDb = settings.mode === "voice" ? 8 : settings.mode === "bass" ? 10 : 0;
+  return volumeDb + eqDb + modeDb;
+}
+
+function applyDynamics(compressor, settings, t) {
+  const amount = Math.max(0, Math.min(1, boostDb(settings) / 6));
+  compressor.ratio.setTargetAtTime(1 + 3 * amount, t, 0.05);
 }
 
 function createCompressor(ctx) {
@@ -47,7 +77,7 @@ function createCompressor(ctx) {
   const t = ctx.currentTime;
   node.threshold.setValueAtTime(-8, t);
   node.knee.setValueAtTime(18, t);
-  node.ratio.setValueAtTime(4, t);
+  node.ratio.setValueAtTime(1, t);
   node.attack.setValueAtTime(0.003, t);
   node.release.setValueAtTime(0.25, t);
   return node;
@@ -91,6 +121,7 @@ function applySettings(engine, nextSettings) {
     node.gain.setTargetAtTime(settings.eqGains[index] || 0, t, 0.015);
   });
   applyMode(engine);
+  applyDynamics(engine.compressor, settings, t);
 }
 
 function teardown(tabId) {
@@ -102,8 +133,8 @@ function teardown(tabId) {
   try { engine.modeFilter.disconnect(); } catch {}
   try { engine.eqNodes.forEach(node => node.disconnect()); } catch {}
   try { engine.compressor.disconnect(); } catch {}
+  try { engine.clipInput.disconnect(); } catch {}
   try { engine.shaper.disconnect(); } catch {}
-  try { engine.analyser.disconnect(); } catch {}
   try { engine.stream.getTracks().forEach(track => track.stop()); } catch {}
   try { engine.ctx.close(); } catch {}
 
@@ -123,9 +154,27 @@ async function openTabStream(streamId) {
 }
 
 async function startEngine(tabId, streamId, settings) {
+  const token = {};
+  startTokens.set(tabId, token);
   teardown(tabId);
 
-  const stream = await openTabStream(streamId);
+  let stream;
+  try {
+    stream = await openTabStream(streamId);
+  } catch (error) {
+    if (startTokens.get(tabId) === token) startTokens.delete(tabId);
+    throw error;
+  }
+
+  // A newer start (or a stop) arrived while getUserMedia was pending: drop
+  // this stream instead of building a second graph that would double audio.
+  if (startTokens.get(tabId) !== token) {
+    try { stream.getTracks().forEach(track => track.stop()); } catch {}
+    return { ok: true, active: engines.has(tabId), superseded: true };
+  }
+  startTokens.delete(tabId);
+  teardown(tabId);
+
   const ctx = new AudioContext({ latencyHint: "interactive" });
   const source = ctx.createMediaStreamSource(stream);
   const gainNode = ctx.createGain();
@@ -139,13 +188,12 @@ async function startEngine(tabId, streamId, settings) {
     return node;
   });
   const compressor = createCompressor(ctx);
+  const clipInput = ctx.createGain();
   const shaper = ctx.createWaveShaper();
-  const analyser = ctx.createAnalyser();
 
+  clipInput.gain.value = 1 / CLIP_RANGE;
   shaper.curve = makeSoftClipCurve();
   shaper.oversample = "2x";
-  analyser.fftSize = 1024;
-  analyser.smoothingTimeConstant = 0.78;
 
   source.connect(gainNode);
   gainNode.connect(modeFilter);
@@ -155,9 +203,9 @@ async function startEngine(tabId, streamId, settings) {
     tail = node;
   }
   tail.connect(compressor);
-  compressor.connect(shaper);
-  shaper.connect(analyser);
-  analyser.connect(ctx.destination);
+  compressor.connect(clipInput);
+  clipInput.connect(shaper);
+  shaper.connect(ctx.destination);
 
   const engine = {
     tabId,
@@ -168,15 +216,17 @@ async function startEngine(tabId, streamId, settings) {
     modeFilter,
     eqNodes,
     compressor,
+    clipInput,
     shaper,
-    analyser,
     settings: normalizeSettings(settings),
     startedAt: Date.now()
   };
   engines.set(tabId, engine);
 
   for (const track of stream.getAudioTracks()) {
-    track.addEventListener("ended", () => teardown(tabId), { once: true });
+    track.addEventListener("ended", () => {
+      if (engines.get(tabId) === engine) teardown(tabId);
+    }, { once: true });
   }
 
   applySettings(engine, settings);
@@ -225,8 +275,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "SS_OFFSCREEN_STOP") {
-    teardown(Number(message.tabId));
-    sendResponse({ ok: true });
+    const tabId = Number(message.tabId);
+    startTokens.delete(tabId);
+    teardown(tabId);
+    sendResponse({ ok: true, count: engines.size });
+    return undefined;
+  }
+
+  if (message.type === "SS_OFFSCREEN_COUNT") {
+    sendResponse({ ok: true, count: engines.size + startTokens.size });
     return undefined;
   }
 

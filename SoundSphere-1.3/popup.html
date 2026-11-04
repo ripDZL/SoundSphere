@@ -9,7 +9,7 @@
     <header class="topbar">
       <div>
         <h1>SoundSphere</h1>
-        <div id="engineStatus" class="engine-status">Ready</div>
+        <div id="engineStatus" class="engine-status" role="status" aria-live="polite">Ready</div>
       </div>
       <div class="top-actions">
         <button id="eqBtn" class="icon-button" type="button" title="Equalizer" aria-label="Equalizer" aria-expanded="false">EQ</button>
@@ -22,7 +22,7 @@
     <section class="volume-section">
       <div id="volumeDisplay" class="volume-display">100%</div>
       <input id="volumeSlider" class="slider" type="range" min="0" max="800" step="5" value="100" aria-label="Volume">
-      <div id="volumeWarning" class="volume-warning">High boost can distort audio.</div>
+      <div id="volumeWarning" class="volume-warning" aria-hidden="true">High boost can distort audio.</div>
     </section>
 
     <section class="button-row">

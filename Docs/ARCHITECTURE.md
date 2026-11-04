@@ -5,16 +5,30 @@
   - `background.js` service worker
   - `offscreen.html` + `offscreen.js`
   - whole-tab audio via `chrome.tabCapture.getMediaStreamId`
-  - one WebAudio graph per captured tab
+  - one WebAudio graph per captured tab: gain -> mode -> 10x EQ -> compressor -> clip pre-gain (1/4) -> soft clip -> destination
+  - background serializes apply/stop per tab (`runForTab`); offscreen drops superseded starts (`startTokens`)
+  - status/stop never create the offscreen doc; doc closes 15 s after last capture ends
+  - after whole-tab START succeeds, background sends `SS_CONTENT_RESET` (prevents double boost)
 - Firefox:
   - `manifest.firefox.json`
   - `background.js` as background script
   - `content.js` media-element/page-WebAudio processor
+  - passive until `SS_CONTENT_APPLY`; `SS_CONTENT_STATUS` never hooks
+  - hooks only CORS-readable media (same-origin, blob:, data:, MediaStream, crossorigin attr) into a running AudioContext
+  - late media hooked on capture-phase `play` (no MutationObserver)
+  - basic mode scales relative to player volume, never above it; reset restores volume/mute
+  - frame replies: media frames answer, top frame answers late, other frames stay silent
 - Shared UI:
   - `popup.*`
   - `options.*`
+- Messaging:
+  - backgrounds accept control messages only from extension pages (`sender.url`)
+  - tab messages time out after 2 s
+- DSP (offscreen, content, tap):
+  - compressor ratio 1 -> 4 over the first 6 dB of boost (avoids makeup-gain jump)
+  - soft clip: identity |x| <= 0.85, tanh knee to 1.0, covers +12 dBFS
 - Storage:
-  - `vol_tabs`: tab-id volume map in `storage.local`
+  - `vol_tabs`: tab-id volume map in `storage.local`; cleared on `runtime.onStartup` (tab ids reset per session)
   - `vol_global`: global fallback volume
   - `mode`, `eqGains`, `eqPreset`, `eqCustomGains`
   - `showBadge`, `rememberVolume`, `startAt100`, `overdrive`

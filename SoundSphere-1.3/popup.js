@@ -149,7 +149,11 @@ function renderSlider() {
   els.slider.value = String(settings.volume);
   els.display.textContent = `${Math.round(settings.volume)}%`;
   els.mute.textContent = settings.volume <= 0 || settings.muted ? "Unmute" : "Mute";
-  els.warning.style.opacity = settings.volume > 600 ? "1" : "0";
+  const loud = settings.volume > 600;
+  els.warning.style.opacity = loud ? "1" : "0";
+  // Hidden text is still read by screen readers unless removed from the tree.
+  els.warning.setAttribute("aria-hidden", String(!loud));
+  els.slider.setAttribute("aria-valuetext", `${Math.round(settings.volume)}%`);
 
   const fill = max > 0 ? (settings.volume / max) * 100 : 0;
   els.slider.style.background =
@@ -202,10 +206,14 @@ function renderAll() {
   renderStatus();
 }
 
-function persistVolume() {
+async function persistVolume() {
   if (prefs.rememberVolume && currentTabId != null) {
+    // Re-read first: the background prunes closed tabs from this map, and a
+    // stale copy from popup open would resurrect them.
+    const fresh = await storageLocalGet({ vol_tabs: {} });
+    tabVolumes = fresh.vol_tabs && typeof fresh.vol_tabs === "object" ? fresh.vol_tabs : {};
     setTabVolume(currentTabId, settings.volume);
-    storageLocalSet({ vol_tabs: tabVolumes });
+    await storageLocalSet({ vol_tabs: tabVolumes });
   } else {
     globalVolume = settings.volume;
     storageSet({ vol_global: globalVolume });
@@ -329,6 +337,8 @@ function createEqGrid() {
 function openPanel(panel, opener) {
   panel.classList.add("open");
   opener.setAttribute("aria-expanded", "true");
+  const first = panel.querySelector("button, select, input");
+  if (first) first.focus();
 }
 
 function closePanel(panel, opener) {
@@ -374,12 +384,21 @@ async function loadPrefs() {
   els.overdrive.checked = prefs.overdrive;
 }
 
+// A tab's own remembered volume wins; "start new tabs at 100%" only applies
+// to tabs without one (it previously overrode remembering entirely).
 function chooseInitialVolume() {
-  if (prefs.startAt100) return 100;
   const remembered = getTabVolume(currentTabId);
   if (prefs.rememberVolume && typeof remembered === "number") return remembered;
+  if (prefs.startAt100) return 100;
   if (!prefs.rememberVolume && typeof globalVolume === "number") return globalVolume;
   return 100;
+}
+
+function isNeutral() {
+  return settings.volume === 100 &&
+    !settings.muted &&
+    settings.mode === "default" &&
+    settings.eqGains.every(value => value === 0);
 }
 
 async function loadTab(tab) {
@@ -395,7 +414,11 @@ async function loadTab(tab) {
 
   const status = await sendRuntime({ type: "SS_GET_STATUS", tabId: currentTabId });
   updateCapability(status);
-  scheduleApply(0);
+
+  // Opening the popup alone should not capture or reroute audio. Apply only
+  // when there is something to change or SoundSphere already controls the tab.
+  const engaged = !!(status && (status.captureActive || status.engaged));
+  if (engaged || !isNeutral()) scheduleApply(0);
 }
 
 async function loadActiveTab() {
@@ -405,6 +428,8 @@ async function loadActiveTab() {
 
 async function loadAudibleTabs() {
   const tabs = await queryTabs({ audible: true });
+  const focused = document.activeElement;
+  const focusedTabId = focused && focused.dataset ? focused.dataset.tabId : null;
   els.tabCount.textContent = String(tabs.length);
   els.tabsList.textContent = "";
 
@@ -445,7 +470,25 @@ async function loadAudibleTabs() {
     });
 
     els.tabsList.appendChild(row);
+    // Keep keyboard focus on the same row across refreshes.
+    if (focusedTabId && row.dataset.tabId === focusedTabId) row.focus();
   }
+}
+
+let tabsRefreshTimer = null;
+function scheduleTabsRefresh() {
+  clearTimeout(tabsRefreshTimer);
+  tabsRefreshTimer = setTimeout(loadAudibleTabs, 150);
+}
+
+// Event-driven instead of a 3 s poll that rebuilt the list (and dropped
+// keyboard focus) even when nothing changed.
+function watchAudibleTabs() {
+  chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+    if ("audible" in changeInfo) scheduleTabsRefresh();
+    else if (tab && tab.audible && (changeInfo.title || changeInfo.favIconUrl)) scheduleTabsRefresh();
+  });
+  chrome.tabs.onRemoved.addListener(() => scheduleTabsRefresh());
 }
 
 function bindEvents() {
@@ -518,5 +561,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderAll();
   await loadActiveTab();
   await loadAudibleTabs();
-  setInterval(loadAudibleTabs, 3000);
+  watchAudibleTabs();
 });

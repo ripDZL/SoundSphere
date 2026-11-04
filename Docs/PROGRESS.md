@@ -17,3 +17,15 @@
 - Rebuilt Chrome and Firefox 1.3 store submission zips.
 - Firefox package passes `web-ext lint` with 0 errors, 0 notices, 0 warnings.
 - Chrome and Firefox packages pass static remote-code scan.
+- 1.3.1: per-tab apply queue + offscreen start tokens (fixes duplicate capture / double audio).
+- 1.3.1: content fallback reset when whole-tab capture takes over.
+- 1.3.1: offscreen doc not created on tab close; idle doc closed after 15 s.
+- 1.3.1: transparent neutral DSP in offscreen, content, tap (new soft clip + adaptive compressor ratio); removed unused AnalyserNode.
+- 1.3.1: content CORS guard + running-context guard (fixes silent media on Bandcamp/CDN audio and autoplayed pages).
+- 1.3.1: passive status, frame-aware replies, no forced element volume, basic mode relative to player volume.
+- 1.3.1: tap `disconnect(destination)` patch; mode segment rebuilt only on change; no fake boost when tap idle.
+- 1.3.1: popup: no capture at neutral on open, remembered volume beats start-at-100, event-driven tab list, a11y (live status, hidden warning, panel focus, slider valuetext).
+- 1.3.1: backgrounds: sender validation, restricted-page status, onStartup `vol_tabs` purge, tab-message timeout.
+- 1.3.1: manifests 1.3.1; font removed from web-accessible resources.
+- Added `tools/package-1.3.sh` and `tests/1.3/` harness; CI runs tests then packages 1.3 into `beta/`.
+- Verified: harness 25/25 (original 1.3: 2/25); Firefox `web-ext lint` 0/0/0; remote-code scan clean.
