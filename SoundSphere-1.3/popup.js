@@ -39,6 +39,8 @@ const els = {
   eqGrid: document.getElementById("eqGrid"),
   eqPreset: document.getElementById("eqPreset"),
   eqReset: document.getElementById("eqReset"),
+  processingNote: document.getElementById("processingNote"),
+  eqNote: document.getElementById("eqNote"),
   showBadge: document.getElementById("showBadge"),
   rememberVolume: document.getElementById("rememberVolume"),
   startAt100: document.getElementById("startAt100"),
@@ -199,10 +201,36 @@ function renderStatus() {
   els.status.textContent = capability.reason ? `${label}: ${capability.reason}` : label;
 }
 
+// Voice/Bass/EQ need a processing path (canBoost). Without one (DRM audio in
+// Firefox, restricted pages) they would silently do nothing, so lock them and
+// say why.
+function processingNote() {
+  if (capability.canBoost) return "";
+  if (capability.mode === "protected-basic") {
+    return "Protected (DRM) audio: Voice, Bass, EQ and boost can't be applied here. Volume up to 100% and mute still work.";
+  }
+  return "Voice, Bass, EQ and boost aren't available on this page.";
+}
+
+function renderProcessing() {
+  const note = processingNote();
+  const locked = note !== "";
+  const controls = [
+    els.defaultMode, els.voiceMode, els.bassMode, els.eqPreset, els.eqReset,
+    ...els.eqGrid.querySelectorAll(".eq-slider")
+  ];
+  for (const control of controls) control.disabled = locked;
+  for (const el of [els.processingNote, els.eqNote]) {
+    el.textContent = note;
+    el.hidden = !locked;
+  }
+}
+
 function renderAll() {
   renderSlider();
   renderMode();
   renderEq();
+  renderProcessing();
   renderStatus();
 }
 

@@ -311,9 +311,15 @@ function makeMainWorldEnv(opts = {}) {
     console: Object.assign(Object.create(console), { info() {} }),
     URL, setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, WeakMap, WeakSet, Map, Set, String, Boolean, JSON
   });
+  const originals = {
+    createMediaStreamSource: world.AudioContext.prototype.createMediaStreamSource,
+    createMediaElementSource: world.AudioContext.prototype.createMediaElementSource,
+    connect: world.AudioNode.prototype.connect,
+    mozCaptureStream: HTMLMediaElement.prototype.mozCaptureStream
+  };
   loadScript(path.join(DIR, "inject/media_main.js"), sandbox);
   const inner = vm.runInContext("window", sandbox);
-  const env = { world, out, HTMLMediaElement, nativePlay, sandbox };
+  const env = { world, out, HTMLMediaElement, nativePlay, sandbox, originals };
   env.el = (props = {}) => {
     const { volume = 1, ...rest } = props;
     return Object.assign(new HTMLMediaElement(), {
@@ -777,22 +783,15 @@ function findNode(world, kind) {
     assert(visible._out === 0.5 && env.world.mediaSources.length === 0, "visible element touched");
   });
 
-  await test("main: diagnostics are passive and report the audio path", async () => {
+  await test("main: only play() is wrapped; audio prototypes and globals untouched", async () => {
     const env = makeMainWorldEnv({ origin: "https://open.spotify.com" });
-    const el = env.el({ tagName: "VIDEO", currentSrc: "blob:https://open.spotify.com/x", mediaKeys: { keySystem: "com.widevine.alpha" }, volume: 0.8 });
-    env.play(el);
-    const stream = el.mozCaptureStream();                 // page captures player audio
-    assert(stream && stream.getAudioTracks().length === 1, "captureStream result changed");
-    const ctx = new env.world.AudioContext();
-    const src = ctx.createMediaStreamSource(stream);
-    const gain = ctx.createGain();
-    assert(src.connect(gain) === gain, "connect return value changed");
-    gain.connect(ctx.destination);
-    env.settings({ ...boost, volume: 50 });
-    const report = JSON.parse(vm.runInContext("__soundSphereDebug()", env.sandbox));
-    assert(report.players.length === 1 && report.players[0].drm && report.players[0].keySystem === "com.widevine.alpha", JSON.stringify(report.players));
-    assert(report.audioGraph.captureStreamCalls === 1 && report.audioGraph.streamSources.length === 1, JSON.stringify(report.audioGraph));
-    assert(report.audioGraph.destConnections.length === 1, "destination connection not recorded");
+    const o = env.originals;
+    const ctxProto = env.world.AudioContext.prototype;
+    assert(ctxProto.createMediaStreamSource === o.createMediaStreamSource &&
+      ctxProto.createMediaElementSource === o.createMediaElementSource, "AudioContext prototype wrapped");
+    assert(env.world.AudioNode.prototype.connect === o.connect, "AudioNode.connect wrapped");
+    assert(env.HTMLMediaElement.prototype.mozCaptureStream === o.mozCaptureStream, "captureStream wrapped");
+    assert(vm.runInContext("typeof __soundSphereDebug", env.sandbox) === "undefined", "debug global exposed");
   });
 
   await test("main: nothing touched before SoundSphere is used", async () => {
@@ -911,6 +910,29 @@ function findNode(world, kind) {
     await tick(80);
     const applies = p.sent.filter(m => m.type === "SS_APPLY_SETTINGS");
     assert(applies.length === 1 && applies[0].settings.volume === 150, "applies=" + JSON.stringify(applies));
+  });
+
+  await test("popup: protected audio locks Voice/Bass/EQ and explains why", async () => {
+    const p = makePopupEnv({ status: { ok: true, mode: "protected-basic", canBoost: false, engaged: false } });
+    await p.run(`loadTab({ id: 3 })`);
+    await tick(20);
+    const el = id => p.sandbox.document.getElementById(id);
+    for (const id of ["defaultBtn", "voiceBtn", "bassBtn", "eqPreset", "eqReset"]) {
+      assert(el(id).disabled === true, id + " not disabled");
+    }
+    assert(el("processingNote").hidden === false && /DRM/.test(el("processingNote").textContent), "no note");
+    assert(el("eqNote").hidden === false, "EQ panel note hidden");
+  });
+
+  await test("popup: processable audio keeps Voice/Bass/EQ enabled", async () => {
+    const p = makePopupEnv();
+    await p.run(`loadTab({ id: 3 })`);
+    await tick(20);
+    const el = id => p.sandbox.document.getElementById(id);
+    for (const id of ["voiceBtn", "bassBtn", "eqPreset", "eqReset"]) {
+      assert(el(id).disabled === false, id + " disabled");
+    }
+    assert(el("processingNote").hidden === true, "note shown");
   });
 
   // ---------------- tap

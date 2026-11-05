@@ -46,3 +46,5 @@
 - 1.3.6: page script intercepts `volume` on managed hidden players (output = page volume x SoundSphere level). Harness 43/43; lint 0/0/0.
 - Owner Firefox 1.3.6: Spotify unchanged (mute + 100% only). Console: hidden `video` found, drm true, 0 DOM media, no player iframe; Spotify code reads `mozAudioCaptured`.
 - 1.3.7: read-only diagnostics in media_main.js (capture/WebAudio counters, `__soundSphereDebug()` report). Harness 44/44; lint 0/0/0.
+- 1.3.7 owner: Spotify Firefox volume works; EQ/Voice/Bass no effect (DRM limit).
+- 1.3.8: popup locks Default/Voice/Bass + EQ (sliders, preset, reset) when `canBoost` false; note under modes + in EQ panel. Diagnostics removed from media_main.js; guard test (audio prototypes untouched, no debug global). Harness 46/46.

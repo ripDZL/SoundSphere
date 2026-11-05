@@ -67,4 +67,11 @@
 - Evidence (owner console): Spotify player = hidden `<video>`, DRM, found by media_main.js; mute works, element volume has no audible effect.
 - Hypothesis: Spotify captures player audio (mozCaptureStream) and plays it through WebAudio, so element volume is bypassed; Spotify volume = a GainNode.
 - 1.3.7 adds passive counters (captureStream calls, MediaStream/MediaElement sources, destination connections) + `__soundSphereDebug()`.
-- Next: owner runs `__soundSphereDebug()` on Spotify after moving slider; if stream source -> destination path confirmed, control Spotify's WebAudio output (possible boost).
+- Result: no WebAudio/capture path on Spotify; element volume works (owner confirmed volume works in 1.3.7). EQ/Voice/Bass impossible on DRM in Firefox.
+
+## 1.3.8 (2026-11-05)
+
+- Popup: `processingNote()`/`renderProcessing()` in popup.js; disabled when `!capability.canBoost`; `#processingNote` (main) + `#eqNote` (EQ panel) in popup.html; disabled styles in popup.css.
+- media_main.js: diagnostics block + `__soundSphereDebug` removed; only `play()` wrapper + volume accessor remain.
+- Tests: diagnostics test replaced by guard; 2 popup tests (locked/unlocked). 46/46.
+- Next: owner tests 1.3.8 Firefox Spotify (controls greyed + note), YouTube/Bandcamp/SoundCloud unchanged; Chrome unchanged.

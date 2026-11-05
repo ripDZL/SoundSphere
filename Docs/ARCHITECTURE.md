@@ -24,6 +24,7 @@
     `crossOrigin="anonymous"` (position/play kept), hooks after `loadedmetadata`; error/5 s timeout reverts; rule removed on tab close
 - Shared UI:
   - `popup.*`
+  - Voice/Bass/EQ locked (disabled + note) when status `canBoost` is false
   - `options.*`
 - Firefox hidden players (`inject/media_main.js`, MAIN world, Spotify + SoundCloud only):
   - plain same-world wrapper on `HTMLMediaElement.prototype.play` records played elements (max 32)

@@ -197,6 +197,33 @@ h1 {
   min-height: 38px;
 }
 
+.button:disabled,
+.mode-button:disabled,
+select:disabled,
+.eq-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.button:disabled:hover,
+.mode-button:disabled:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.button-primary:disabled:hover,
+.mode-button.active:disabled:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.processing-note {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .tabs-section {
   border-top: 1px solid var(--border);
   padding-top: 12px;
