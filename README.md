@@ -72,7 +72,7 @@ In both browsers, opening the popup alone never changes a tab's audio.
 
 ## Privacy
 
-SoundSphere collects no data. There are no analytics, no telemetry, no ads and no remote code, and the extension makes no network requests. Audio is processed in real time on your device and is never recorded or saved. Settings stay in your browser's extension storage.
+SoundSphere collects no data. There are no analytics, no telemetry, no ads and no remote code, and the extension has no servers: nothing is ever sent anywhere. Audio is processed in real time on your device and is never recorded or saved. Settings stay in your browser's extension storage.
 
 Full policy: [privacy.html](privacy.html)
 
