@@ -1,91 +1,117 @@
 <p align="center">
-  <img src="logo.png" alt="SoundSphere logo" width="300">
+  <img src="logo.png" alt="SoundSphere" width="160">
 </p>
 
-# SoundSphere
-**Per-tab volume booster + EQ for Chrome and Firefox.**  
-Boost quiet tabs up to **800%**, shape sound with **Voice/Bass** modes and a **10-band EQ**, and see which tabs are playing audio. Everything is processed locally, with **no tracking**.
+<h1 align="center">SoundSphere</h1>
 
-Current version: **1.3.1**
+<p align="center">
+  Per-tab volume booster and 10-band equalizer for Chrome and Firefox.<br>
+  Boost quiet tabs up to 800%, shape the sound, and keep every playing tab in view. All processing stays in your browser.
+</p>
 
----
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/soundsphere/bmdclfobmjbikodcmbdhmfoadboimaln"><img alt="Chrome Web Store" src="https://img.shields.io/chrome-web-store/v/bmdclfobmjbikodcmbdhmfoadboimaln?label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white"></a>
+  <a href="https://addons.mozilla.org/en-US/firefox/addon/soundsphere/"><img alt="Firefox Add-ons" src="https://img.shields.io/amo/v/soundsphere?label=Firefox%20Add-ons&logo=firefoxbrowser&logoColor=white"></a>
+  <a href="https://github.com/ripDZL/SoundSphere/actions/workflows/build.yml"><img alt="Build" src="https://github.com/ripDZL/SoundSphere/actions/workflows/build.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/ripDZL/SoundSphere"></a>
+</p>
 
-## Install
-- **Firefox (AMO):** https://addons.mozilla.org/en-US/firefox/addon/soundsphere/
-- **Chrome (Web Store):** https://chromewebstore.google.com/detail/soundsphere/bmdclfobmjbikodcmbdhmfoadboimaln
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/soundsphere/bmdclfobmjbikodcmbdhmfoadboimaln"><b>Install for Chrome</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://addons.mozilla.org/en-US/firefox/addon/soundsphere/"><b>Install for Firefox</b></a>
+</p>
+
+<p align="center">
+  <img src="store-assets/screenshots/popup.png" alt="SoundSphere popup: volume at 180%, Voice mode, list of playing tabs" width="320">
+  &nbsp;&nbsp;
+  <img src="store-assets/screenshots/equalizer.png" alt="SoundSphere 10-band equalizer with the V-Shape preset" width="320">
+</p>
 
 ---
 
 ## Features
-### 🔊 Volume boost (up to 800%)
-- **0%** = mute
-- **100%** = original volume (SoundSphere is transparent at 100% with a flat EQ)
-- **100–600%** = strong boost, generally usable
-- **600–800%** = overdrive, can distort (can be turned off in Settings)
 
-A soft limiter keeps boosted audio from hard-clipping.
+- **Volume from 0% to 800% per tab.** 100% is the original level; above 600% is optional overdrive. A soft limiter keeps boosted audio from clipping harshly.
+- **Transparent at 100%.** With a flat EQ and Default mode, audio passes through unchanged; only peaks near full scale reach the soft limiter.
+- **Quick modes.** Default, Voice (clearer speech) and Bass (more low end).
+- **10-band equalizer** from 31 Hz to 16 kHz, with 12 presets (Flat, Rock, Pop, Hip-Hop, Jazz, Classical, Electronic, Vocal, Live Clean, Bass Boost, Treble Boost, V-Shape) and a custom setting.
+- **Playing-tabs list.** See every tab playing audio and jump to it in one click; optional toolbar badge with the count.
+- **Remembered volume.** Per tab for the current session, or one global volume; optionally start new tabs at 100%.
+- **Lightweight.** No page's audio is touched until you use the popup, and the audio engine shuts down when no tab is being processed.
 
-### 🎛️ 10-band EQ + quick modes
-- **Default**: neutral
-- **Voice**: helps speech cut through videos and streams
-- **Bass**: adds low end for music and games
-- 12 EQ presets plus custom bands; works at any volume, including 100%
+## Browser support
 
-### 🔔 Playing-tab list + badge
-- Popup lists tabs that are playing audio; click one to jump to it
-- Optional toolbar badge with the number of playing tabs
+| | Chrome | Firefox |
+|---|---|---|
+| Minimum version | 116 | 140 (desktop), 142 (Android) |
+| Boost, EQ and modes | Any site that plays audio | Standard HTML5 players (e.g. YouTube, Bandcamp, SoundCloud) |
+| Protected (DRM) audio, e.g. Spotify Web | Full support | Volume 0–100% and mute ¹ |
+| Website access required | None | All sites |
 
-### 💾 Settings
-- Remember volume per tab, or use one global volume
-- Start new tabs at 100%
-- Allow or block 800% overdrive
-
----
+¹ Firefox does not allow extensions to process DRM-protected audio. SoundSphere greys out boost, EQ and modes on those sites and explains why in the popup.
 
 ## How it works
-- **Chrome:** captures the tab you're on (after you use the popup) and processes it in a hidden audio page. Works on any site that plays audio, including protected services such as Spotify, without any access to website data. To adjust a tab from the playing-tabs list, switch to it and click the SoundSphere icon.
-- **Firefox:** Firefox has no tab capture for extensions, so SoundSphere processes the page's own `<audio>`/`<video>` elements. When a site serves audio from another domain without CORS headers (e.g. Bandcamp), SoundSphere briefly reloads the track with CORS allowed for that tab so it can be boosted.
 
-### Protected (DRM) audio in Firefox
-Firefox does not let extensions process DRM-protected audio (Widevine/EME, e.g. Spotify Web). On those sites SoundSphere offers **volume 0–100% and mute**; boost, EQ and Voice/Bass are greyed out in the popup with a short explanation. In Chrome, these sites work fully.
+**Chrome.** When you change a setting in the popup, SoundSphere captures that tab's audio with the `tabCapture` API and processes it in an offscreen Web Audio graph: gain → mode filter → 10-band EQ → compressor → soft limiter. Opening the popup grants access to that tab only (`activeTab`), so the Chrome version needs no website permissions and runs no scripts in web pages. To adjust a tab from the playing-tabs list, switch to it and click the SoundSphere icon.
 
----
+**Firefox.** Firefox has no tab capture for extensions, so SoundSphere routes the page's own `<audio>` and `<video>` elements through the same Web Audio chain. It only reroutes audio that Web Audio can actually read, so it doesn't silence playback. When a site streams media from another domain without CORS headers (Bandcamp, for example), SoundSphere adds a CORS header to media responses in that tab only and reloads the track once; the rule is removed when the tab closes.
 
-## Permissions & privacy
-| Permission | Why |
-|---|---|
-| `activeTab`, `tabs` | Control the tab you pick; list tabs playing audio |
-| `storage` | Save your settings |
-| Access to all websites (Firefox) | Adjust the page's audio and video players on whichever site you use it on |
-| `tabCapture`, `offscreen` (Chrome) | Process the tab's audio locally; Chrome needs no website access |
-| `declarativeNetRequestWithHostAccess` (Firefox) | Add a CORS header to media in a boosted tab only, so cross-domain audio can be processed; removed when the tab closes |
+In both browsers, opening the popup alone never changes a tab's audio.
 
-- No analytics, telemetry, ads or remote code
-- Audio never leaves your browser
-- Full policy: [privacy.html](privacy.html)
+## Permissions
+
+| Permission | Browser | Purpose |
+|---|---|---|
+| `activeTab` | Both | Work with the tab where you opened the popup |
+| `tabs` | Both | List tabs that are playing audio and switch to them |
+| `storage` | Both | Save your settings |
+| `tabCapture`, `offscreen` | Chrome | Capture and process the tab's audio locally |
+| Access to all websites | Firefox | Adjust the page's audio and video players |
+| `declarativeNetRequestWithHostAccess` | Firefox | Add a CORS header to media in a boosted tab, so cross-domain audio can be processed |
+
+## Privacy
+
+SoundSphere collects no data. There are no analytics, no telemetry, no ads and no remote code, and the extension makes no network requests. Audio is processed in real time on your device and is never recorded or saved. Settings stay in your browser's extension storage.
+
+Full policy: [privacy.html](privacy.html)
 
 ---
 
 ## Development
+
 ```
-SoundSphere-1.3/          extension source (shared by both browsers)
-  manifest.json           Chrome (MV3, Chrome 116+)
-  manifest.firefox.json   Firefox (MV3, Firefox 140+, Android 142+)
-tests/1.3/                regression harness (Node, no dependencies)
-tools/package-1.3.sh      builds the store packages
-beta/                     latest CI build (Chrome .zip + Firefox .xpi)
-store-assets/             icons for store listings (not packaged)
-Docs/                     project notes and store submission notes
+SoundSphere-1.3/          Extension source, shared by both browsers
+  manifest.json           Chrome manifest (MV3)
+  manifest.firefox.json   Firefox manifest (MV3), packaged as manifest.json
+tests/1.3/                Regression harness (Node.js, no dependencies)
+tools/package-1.3.sh      Builds the store packages
+beta/                     Latest CI build (.zip for Chrome, .xpi for Firefox)
+store-assets/             Store icons and screenshots (not packaged)
+Docs/                     Architecture, decisions and store submission notes
 ```
 
-- **Test:** `node tests/1.3/test.js`
-- **Package:** `bash tools/package-1.3.sh <out-dir>` → `SoundSphere-<version>-chrome.zip` and `SoundSphere-<version>-firefox.xpi`
-- **Load in Chrome:** `chrome://extensions` → Developer mode → Load unpacked → `SoundSphere-1.3/`
-- **Load in Firefox:** `about:debugging#/runtime/this-firefox` → Load Temporary Add-on → the `.xpi` from `beta/`
+**Requirements:** Node.js 18+, Python 3, `zip`.
 
-CI runs the tests and publishes fresh builds to `beta/` on every push to `main`.
+```bash
+# Run the regression harness
+node tests/1.3/test.js
 
----
+# Build SoundSphere-<version>-chrome.zip and SoundSphere-<version>-firefox.xpi
+bash tools/package-1.3.sh dist
+```
+
+**Load an unpacked build**
+
+- Chrome: open `chrome://extensions`, enable Developer mode, choose **Load unpacked** and select `SoundSphere-1.3/`.
+- Firefox: open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on** and select the `.xpi` from `beta/` or `dist/`.
+
+Every push to `main` runs the tests and publishes fresh packages to `beta/`.
+
+## Support
+
+Found a bug or have a request? [Open an issue](https://github.com/ripDZL/SoundSphere/issues) with your browser version, the site, and what you expected to happen.
 
 ## License
-MIT — see `LICENSE`. JetBrains Mono font: SIL Open Font License 1.1 (`SoundSphere-1.3/fonts/OFL.txt`).
+
+[MIT](LICENSE). The bundled JetBrains Mono font is licensed under the SIL Open Font License 1.1 (`SoundSphere-1.3/fonts/OFL.txt`).
