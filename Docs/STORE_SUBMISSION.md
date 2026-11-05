@@ -98,3 +98,54 @@ Also available for Firefox: https://addons.mozilla.org/en-US/firefox/addon/sound
 SAFETY NOTE
 High boost levels can distort audio and may damage hearing or speakers. Start low, especially with headphones.
 ```
+
+## AMO listing — About this extension (1.3.1)
+Old text: "What's New in 1.3", claimed settings survive restarts (per-tab volumes are cleared at browser start by design), no Spotify/DRM specifics, no explanation of all-sites access, no privacy policy link. Category "Appearance" is wrong for an audio add-on.
+
+```
+SoundSphere is a per-tab volume booster and equalizer. Boost quiet tabs up to 800%, shape the sound with Voice and Bass modes or a 10-band EQ, and see which tabs are playing audio. Everything is processed locally in Firefox.
+
+WHAT'S NEW IN 1.3.1
+• Boost and EQ now work on Bandcamp, SoundCloud and other sites that stream audio from another domain
+• Spotify: volume and mute now work; EQ, Voice and Bass are greyed out there with an explanation (see Limitations)
+• 100% with a flat EQ now sounds exactly like SoundSphere being off
+• Opening the popup no longer changes a tab's audio on its own
+• Lowering the volume never makes a player louder than its own setting, and resetting gives the player its volume back
+• Remembered tab volumes no longer carry over to unrelated tabs after a restart
+• Better screen reader and keyboard support
+
+FEATURES
+• Volume from 0% to 800% per tab (600% max if you turn off overdrive)
+• A soft limiter keeps boosted audio from clipping harshly
+• Quick modes: Default, Voice (clearer speech), Bass (more low end)
+• 10-band EQ (31 Hz to 16 kHz) with presets: Flat, Rock, Pop, Hip-Hop, Jazz, Classical, Electronic, Vocal, Live Clean, Bass Boost, Treble Boost, V-Shape, plus your own custom setting
+• List of tabs playing audio; click one to jump to it
+• Optional toolbar badge showing how many tabs are playing (desktop)
+• Remember volume per tab for the current session, or use one global volume; option to start new tabs at 100%
+• Also works on Firefox for Android
+
+HOW IT WORKS
+Open the popup on a tab and move the slider, pick a mode or set the EQ. Opening the popup alone changes nothing. SoundSphere processes the page's own audio and video players with the Web Audio API.
+• If a video started playing before you clicked anything on the page, Firefox may ask for one click on the page before boost and EQ can start
+• Bandcamp and similar sites: the track reloads once (about a second) the first time you boost, then plays boosted
+
+LIMITATIONS
+• Protected (DRM) audio, such as Spotify Web: Firefox does not let add-ons process this audio, so only volume from 0% to 100% and mute are available. Boost, EQ and Voice/Bass are greyed out with a short explanation.
+• Firefox's own pages (about: pages, addons.mozilla.org) can't be controlled.
+
+PERMISSIONS
+• Access your data for all websites: lets SoundSphere adjust audio on whichever site you use it on. It only looks at the page's audio and video players; nothing from the page is stored or sent anywhere.
+• Access browser tabs: lists the tabs that are playing audio and switches to one when you click it.
+• Storage: saves your settings.
+• Network request rules (no prompt): when you boost a tab whose audio comes from another domain, SoundSphere adds a CORS header to media in that tab only, so the audio can be processed. The rule is removed when the tab closes.
+
+PRIVACY
+• All audio processing happens on your device; audio is never recorded or saved
+• No analytics, tracking, ads or remote code; SoundSphere makes no network requests
+• Privacy policy: https://ripdzl.github.io/SoundSphere/privacy.html
+
+Source code and issues: https://github.com/ripDZL/SoundSphere
+Also available for Chrome: https://chromewebstore.google.com/detail/soundsphere/bmdclfobmjbikodcmbdhmfoadboimaln
+
+High boost levels can distort audio and may damage hearing or speakers. Start low, especially with headphones.
+```
