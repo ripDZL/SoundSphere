@@ -26,9 +26,9 @@ const IS_TOP_FRAME = (() => {
   try { return window.top === window; } catch { return false; }
 })();
 
-// Diagnostics for beta builds: decisions on the CORS / off-DOM paths only
-// (rare events, never per-sample). Visible in the page's web console.
-const DEBUG_LOG = true;
+// Diagnostics: decisions on the CORS / hidden-player paths only (rare events,
+// never per-sample), printed to the page's web console. Off in release builds.
+const DEBUG_LOG = false;
 function ssLog(...args) {
   if (!DEBUG_LOG) return;
   try { console.info("[SoundSphere]", ...args); } catch {}

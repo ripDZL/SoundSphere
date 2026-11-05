@@ -1,27 +1,34 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>SoundSphere Privacy Policy</title>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoundSphere Privacy Policy</title>
 </head>
 <body>
 <h2>SoundSphere Privacy Policy</h2>
-<p><strong>Last updated:</strong> November 25, 2025</p>
+<p><strong>Last updated:</strong> November 4, 2026</p>
 
-<p>SoundSphere does not collect, store, transmit, or share any personal data.</p>
+<p>SoundSphere does not collect, transmit, sell, or share any personal data. It has no analytics, no telemetry, no ads, and no remote code.</p>
 
-<h3>Data Collection</h3>
-<p>The extension does not collect or process any personal information. All audio control and settings take place locally within your browser.</p>
+<h3>Audio</h3>
+<p>All audio processing (volume, equalizer, Voice/Bass modes) happens locally in your browser. Audio is never recorded, saved, or sent anywhere.</p>
 
-<h3>Data Sharing</h3>
-<p>No data is ever transmitted to external servers or shared with third parties.</p>
+<h3>Settings stored on your device</h3>
+<p>SoundSphere saves only its own preferences: volume per tab, mode, equalizer values, and options such as the badge and overdrive. These are kept in your browser's extension storage. If browser sync is turned on, your browser (Google or Mozilla) may sync these preferences between your own devices; the developer never receives them. Per-tab volumes are cleared each time the browser starts.</p>
 
 <h3>Permissions</h3>
-<p>The permissions requested by SoundSphere (tabs, activeTab, host permissions, and storage) are used solely to enable audio control and user preference saving. No data from these permissions is collected or sent outside of the user's device.</p>
+<ul>
+<li><strong>activeTab, tabs</strong>: control the tab you choose and list tabs that are currently playing audio (title and icon shown only in the popup).</li>
+<li><strong>storage</strong>: save the preferences described above.</li>
+<li><strong>Access to websites</strong>: adjust audio on the sites where you use SoundSphere. Page content is not read or collected.</li>
+<li><strong>tabCapture, offscreen</strong> (Chrome): process the selected tab's audio locally after you use the popup.</li>
+<li><strong>declarativeNetRequestWithHostAccess</strong> (Firefox): when you boost a tab whose audio is served from another domain without CORS headers, SoundSphere adds a CORS header to media responses in that tab only, so the audio can be processed locally. The rule is removed when the tab closes and never outlives the browser session.</li>
+</ul>
+<p>No data obtained through these permissions leaves your device.</p>
 
 <h3>Contact</h3>
-<p>If you have any questions, you can contact the developer at: <br>
-<a href="mailto:your@email.com">https://github.com/ripDZL/ </a></p>
+<p>Questions: <a href="https://github.com/ripDZL/SoundSphere/issues">github.com/ripDZL/SoundSphere/issues</a></p>
 
 </body>
 </html>

@@ -48,7 +48,7 @@ function makeAudioWorld(opts = {}) {
       if (opts.resumeWorks !== false && this.state === "suspended") this._setState("running");
       return Promise.resolve();
     }
-    close() { this.closed = true; this.state = "closed"; return Promise.resolve(); }
+    close() { this.closed = true; this._setState("closed"); return Promise.resolve(); }
     createGain() { const n = new AudioNodeBase(this, "gain"); n.gain = makeParam(1); return n; }
     createBiquadFilter() {
       const n = new AudioNodeBase(this, "biquad");

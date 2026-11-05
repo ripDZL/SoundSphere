@@ -328,7 +328,8 @@ function makeMainWorldEnv(opts = {}) {
     }, rest);
   };
   env.play = el => HTMLMediaElement.prototype.play.call(el);
-  env.settings = settings => listeners.forEach(fn => fn({ source: inner, data: { source: "SoundSphere", type: "SS_MAIN_SETTINGS", payload: settings } }));
+  env.post = data => listeners.forEach(fn => fn({ source: inner, data }));
+  env.settings = settings => env.post({ source: "SoundSphere", type: "SS_MAIN_SETTINGS", payload: settings });
   env.lastStatus = () => [...out].reverse().find(m => m.type === "SS_MAIN_STATUS");
   return env;
 }
@@ -375,7 +376,10 @@ function makePopupEnv(opts = {}) {
   const mkEl = id => ({
     id, value: "100", max: "800", textContent: "", style: {}, dataset: {}, checked: false,
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-    setAttribute() {}, removeAttribute() {}, getAttribute: () => null, addEventListener() {}, appendChild() {}, append() {},
+    setAttribute() {}, removeAttribute() {}, getAttribute: () => null, appendChild() {}, append() {},
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
+    fire(type) { return Promise.all((this.listeners[type] || []).map(fn => fn({ type }))); },
     querySelector: () => null, querySelectorAll: () => [], focus() {}, closest: () => null, hidden: false
   });
   const document = {
@@ -794,6 +798,18 @@ function findNode(world, kind) {
     assert(vm.runInContext("typeof __soundSphereDebug", env.sandbox) === "undefined", "debug global exposed");
   });
 
+  await test("main: hidden-player bus is not rerouted through the page tap (no double boost)", async () => {
+    const env = makeMainWorldEnv({ origin: "https://soundcloud.com" });
+    loadScript(path.join(DIR, "inject/webaudio_tap.js"), env.sandbox); // tap arrives after media_main
+    const el = env.el({ currentSrc: "blob:https://soundcloud.com/x" });
+    env.play(el);
+    env.settings({ ...boost, volume: 200 });
+    assert(env.world.mediaSources.length === 1, "hidden player not hooked");
+    env.post({ source: "SoundSphere", type: "SS_SETTINGS", payload: { volumePercent: 200, eq: [] } });
+    const applied = [...env.out].reverse().find(m => m.source === "SoundSphereTap" && m.type === "SS_TAP_APPLIED");
+    assert(applied && applied.payload.contexts === 0, "tap rerouted SoundSphere's own bus: " + JSON.stringify(applied));
+  });
+
   await test("main: nothing touched before SoundSphere is used", async () => {
     const env = makeMainWorldEnv();
     const el = env.el({ currentSrc: "blob:https://soundcloud.com/x", volume: 0.7 });
@@ -935,7 +951,38 @@ function findNode(world, kind) {
     assert(el("processingNote").hidden === true, "note shown");
   });
 
+  await test("popup: saving settings on an untouched tab does not start capture", async () => {
+    const p = makePopupEnv();
+    p.run(`bindEvents()`);
+    await p.run(`loadTab({ id: 3 })`);
+    await tick(20);
+    await p.sandbox.document.getElementById("saveSettings").fire("click");
+    await tick(80);
+    const applies = p.sent.filter(m => m.type === "SS_APPLY_SETTINGS").length;
+    assert(applies === 0, `apply sent ${applies}x after save at neutral`);
+  });
+
   // ---------------- tap
+  await test("tap: closed page AudioContexts are released", async () => {
+    const world = makeAudioWorld();
+    const listeners = [];
+    const out = [];
+    const win = { AudioNode: world.AudioNode, addEventListener(t, fn) { if (t === "message") listeners.push(fn); }, postMessage(d) { out.push(d); } };
+    win.window = win;
+    const sandbox = Object.assign(win, { console, Symbol, WeakMap, WeakSet, Set, Map, Math, Number, Array, Float32Array, Object });
+    loadScript(path.join(DIR, "inject/webaudio_tap.js"), sandbox);
+    const inner = vm.runInContext("window", sandbox);
+    const settingsMsg = () => listeners.forEach(fn => fn({ source: inner, data: { source: "SoundSphere", type: "SS_SETTINGS", payload: { volumePercent: 150, eq: [] } } }));
+    const contexts = () => [...out].reverse().find(m => m.type === "SS_TAP_APPLIED").payload.contexts;
+    const ctx = new world.AudioContext();
+    ctx.createGain().connect(ctx.destination);
+    settingsMsg();
+    assert(contexts() === 1, "context not tracked");
+    await ctx.close();
+    settingsMsg();
+    assert(contexts() === 0, "closed context still held");
+  });
+
   await test("tap: page disconnect(destination) after reroute does not throw", async () => {
     const world = makeAudioWorld();
     const win = { AudioNode: world.AudioNode, addEventListener() {}, postMessage() {} };

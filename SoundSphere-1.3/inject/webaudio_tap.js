@@ -236,6 +236,12 @@
       chain = buildChain(ctx);
       chains.set(ctx, chain);
       seenContexts.add(ctx);
+      // Drop closed contexts so pages that create many don't leak them.
+      try {
+        ctx.addEventListener("statechange", () => {
+          if (ctx.state === "closed") seenContexts.delete(ctx);
+        });
+      } catch {}
 
       // Initial apply
       applySettings(chain);

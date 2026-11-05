@@ -1,16 +1,18 @@
 # AI Context
 
 - Project: SoundSphere browser extension.
-- Current milestone: SoundSphere 1.3.8 (popup locks Voice/Bass/EQ when no processing path; Spotify diagnostics removed).
+- Current milestone: SoundSphere 1.3.1 store candidate (1.3.0 = last submitted to both stores). Internal betas 1.3.2-1.3.8 were pre-release iterations, folded into 1.3.1.
+- Store notes: `Docs/STORE_SUBMISSION.md` (permission justifications, AMO reviewer notes, release notes).
 - New package path: `SoundSphere-1.3/`.
 - Chrome target: MV3, Chrome 116+, `tabCapture` + offscreen WebAudio.
 - Firefox target: MV3 package manifest with content-script media processing fallback, Firefox 140+ for AMO data-consent support.
-- Legacy release folders remain untouched.
+- Repo cleaned 2026-11-04: legacy `Chrome/`, `FireFox/`, `backup/`, old `beta/` builds, `beta/SoundSphere-2.0-inc1b`, 1.3.0 zips removed. Restore from commit 66de83e (`git checkout 66de83e -- <path>`). Tag push blocked by session policy.
+- `beta/` holds only the current build (CI wipes it before packaging). Unused icons live in `store-assets/icons/` (not packaged).
 - Research notes: `Docs/RESEARCH_AUDIO_EXTENSIONS.md`.
 - Package: `tools/package-1.3.sh [outdir]` -> `SoundSphere-<ver>-chrome.zip` + `SoundSphere-<ver>-firefox.xpi`; CI writes to `beta/`.
-- Tests: `node tests/1.3/test.js` (vm harness, 46 checks); CI runs it before packaging.
+- Tests: `node tests/1.3/test.js` (vm harness, 49 checks); CI runs it before packaging.
 - Rule: own code only; reference add-ons (e.g. GPL '600% Sound Booster (Fixed)') are not copied — repo is MIT.
-- Debug: `DEBUG_LOG` in content.js prints `[SoundSphere]` lines (CORS/off-DOM/backend changes); turn off before store submission.
+- Debug: `DEBUG_LOG` in content.js and inject/media_main.js (false in releases); set true locally to get `[SoundSphere]` console lines.
 - Limit: Widevine/DRM media (Spotify Web) cannot be routed through WebAudio in Firefox; 0-100% + mute only. Owner confirmed 1.3.7: volume works, EQ/Voice/Bass no effect (expected).
 - Rule: popup disables Default/Voice/Bass + EQ controls whenever status `canBoost` is false, with a note (DRM text for `protected-basic`).
 - Rule: content fallback never reroutes cross-origin media without CORS or into a non-running AudioContext (both = silence).
@@ -18,3 +20,5 @@
 - Rule: opening the popup alone must not capture or reroute audio.
 - Rule: content.js must not patch page prototypes (exportFunction/wrappedJSObject). 1.3.3 did; Firefox pages stopped loading. Guard test enforces.
 - Rule: page-world code lives only in `inject/media_main.js` (manifest `world: MAIN`), scoped to open.spotify.com + soundcloud.com; widen only after real-browser testing.
+- Rule: media_main.js connects its bus with the native `AudioNode.connect` captured at load, so webaudio_tap.js never reroutes it (double boost).
+- Decision: Firefox CORS rule stays tab-scoped (no initiatorDomains): content-script-set `src` loads may carry the extension principal, so initiator matching is unverified; revisit only with real-browser testing.

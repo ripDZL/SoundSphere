@@ -17,27 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test SoundSphere 1.3 (regression harness)
-        if: hashFiles('tests/1.3/test.js') != ''
+      - name: Test (regression harness)
         run: node tests/1.3/test.js
 
       - name: Package builds (Chrome .zip + Firefox .xpi)
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          mkdir -p beta
-          for d in Chrome/*/SoundSphere; do
-            v=$(echo "$d" | cut -d/ -f2)
-            (cd "$d" && zip -rq "$GITHUB_WORKSPACE/beta/SoundSphere-chrome-${v}.zip" . -x "*.DS_Store")
-          done
-          for d in FireFox/*/SoundSphere; do
-            v=$(echo "$d" | cut -d/ -f2)
-            (cd "$d" && zip -rq "$GITHUB_WORKSPACE/beta/SoundSphere-firefox-${v}.xpi" . -x "*.DS_Store")
-          done
-          # Unified 1.3 package: one source folder, two manifests.
-          if [ -d SoundSphere-1.3 ]; then
-            bash tools/package-1.3.sh beta
-          fi
+          # beta/ holds only the current build; older ones live in git history.
+          rm -rf beta
+          bash tools/package-1.3.sh beta
           ls -l beta
 
       - name: Commit builds to beta/
@@ -46,7 +34,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
-          git add beta
+          git add -A beta
           if git diff --cached --quiet; then
             echo "No build changes to commit."
           else

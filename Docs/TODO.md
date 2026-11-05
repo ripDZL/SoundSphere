@@ -1,11 +1,11 @@
 # TODO
 
-- Manual Chrome 1.3.1: YouTube, Twitch, Spotify, Netflix; 100% should sound identical to extension off.
-- Manual Chrome: open popup, drag slider immediately; expect one capture, no double audio.
+- Smoke test 1.3.1 before submitting (beta/ builds):
+  - Chrome: YouTube, Spotify, Bandcamp; 100% sounds identical to off; drag slider right after opening popup (one capture, no double audio).
+  - Firefox: YouTube, Bandcamp (boost after short reload), SoundCloud (boost not doubled), Spotify (volume + mute, rest greyed).
+- Submit 1.3.1 to CWS and AMO using `Docs/STORE_SUBMISSION.md`.
 - Manual Chrome: boost tab A, pick tab B in list, boost; close both; offscreen doc gone ~15 s later (chrome://inspect/#other).
-- Manual Firefox 140+ (1.3.2): Bandcamp boost >100% after a short reload blip; next track keeps boost; SoundCloud boost.
-- Manual Firefox 1.3.5: SoundCloud page loads/plays; boost/EQ work; embedded SoundCloud widget too.
-- Manual Firefox: YouTube regression; autoplayed tab shows "Click the page once".
+- Manual Firefox: embedded SoundCloud widget on another site; autoplayed YouTube tab shows "Click the page once".
 - Manual multi-window audible-tab focus test.
 - Decide: per-tab vs per-site remembered volume.
-- Confirm Chrome Web Store copy, screenshots, permission justifications.
+- Optional hardening (needs real Firefox test): scope CORS rule beyond tab id (initiatorDomains/requestDomains).

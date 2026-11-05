@@ -49,3 +49,7 @@
 - 1.3.7 owner: Spotify Firefox volume works; EQ/Voice/Bass no effect (DRM limit).
 - 1.3.8: popup locks Default/Voice/Bass + EQ (sliders, preset, reset) when `canBoost` false; note under modes + in EQ panel. Diagnostics removed from media_main.js; guard test (audio prototypes untouched, no debug global). Harness 46/46.
 - 1.3.8 owner (Firefox): Spotify DRM grey-out confirmed working.
+- 1.3.1 store candidate (2026-11-04): versions relabelled 1.3.8 -> 1.3.1. Repo cleanup (legacy folders, old builds; restore point 66de83e). CI packages only 1.3 and keeps one build in beta/.
+- 1.3.1 review fixes: DEBUG_LOG off (content.js, media_main.js); media_main bus bypasses page tap (was double boost on SoundCloud when tap loaded first); tap releases closed AudioContexts (leak); popup Save no longer starts capture at neutral; Firefox Android guards (chrome.windows, badge). Harness 49/49.
+- 1.3.1 packaging: Chrome zip excludes media_main.js; 13 unused icons moved to store-assets/; fonts/OFL.txt added; packages ~114 KB (was ~310 KB). web-ext lint 0/0/0; Chrome zip loads in Chromium, no errors.
+- privacy.html: fixed placeholder contact (`mailto:your@email.com`), lists all permissions incl. tabCapture/offscreen/DNR. README rewritten for 1.3.1.

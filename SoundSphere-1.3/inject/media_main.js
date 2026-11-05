@@ -42,6 +42,10 @@
   const volumeDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
   const nativeGetVolume = el => volumeDescriptor.get.call(el);
   const nativeSetVolume = (el, value) => volumeDescriptor.set.call(el, value);
+  // Captured before SoundSphere's page WebAudio tap can patch connect(), so
+  // this bus is never rerouted through the tap (which would boost twice).
+  const nativeConnect = window.AudioNode && window.AudioNode.prototype.connect;
+  const DEBUG_LOG = false;
   let bus = null;
   let settings = null;              // null until SoundSphere is used on the tab
 
@@ -151,7 +155,8 @@
     tail.connect(compressor);
     compressor.connect(clipInput);
     clipInput.connect(shaper);
-    shaper.connect(ctx.destination);
+    if (nativeConnect) nativeConnect.call(shaper, ctx.destination);
+    else shaper.connect(ctx.destination);
 
     ctx.addEventListener("statechange", () => {
       if (ctx.state === "running") applyAll();
@@ -284,7 +289,7 @@
     if (!tracked.includes(el)) {
       tracked.push(el);
       if (tracked.length > TRACK_LIMIT) tracked.shift();
-      if (isHidden(el)) {
+      if (DEBUG_LOG && isHidden(el)) {
         try {
           console.info("[SoundSphere] hidden player found:", el.tagName.toLowerCase(),
             "| drm:", isDrm(el), "| readable:", isReadable(el));

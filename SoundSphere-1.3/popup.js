@@ -53,6 +53,7 @@ let globalVolume = 100;
 let lastNonZeroVolume = 100;
 let applyTimer = null;
 let applySeq = 0;
+let tabEngaged = false; // SoundSphere already controls the current tab
 
 const prefs = {
   showBadge: true,
@@ -104,7 +105,9 @@ function updateTab(tabId, updateInfo) {
   return new Promise(resolve => chrome.tabs.update(tabId, updateInfo, resolve));
 }
 
+// chrome.windows does not exist on Firefox for Android.
 function updateWindow(windowId, updateInfo) {
+  if (!chrome.windows || typeof chrome.windows.update !== "function") return Promise.resolve();
   return new Promise(resolve => chrome.windows.update(windowId, updateInfo, resolve));
 }
 
@@ -269,6 +272,7 @@ function updateCapability(response) {
 async function applySettingsNow() {
   if (!currentTabId) return;
   const seq = ++applySeq;
+  tabEngaged = true;
   const response = await sendRuntime({
     type: "SS_APPLY_SETTINGS",
     tabId: currentTabId,
@@ -445,8 +449,8 @@ async function loadTab(tab) {
 
   // Opening the popup alone should not capture or reroute audio. Apply only
   // when there is something to change or SoundSphere already controls the tab.
-  const engaged = !!(status && (status.captureActive || status.engaged));
-  if (engaged || !isNeutral()) scheduleApply(0);
+  tabEngaged = !!(status && (status.captureActive || status.engaged));
+  if (tabEngaged || !isNeutral()) scheduleApply(0);
 }
 
 async function loadActiveTab() {
@@ -558,7 +562,8 @@ function bindEvents() {
     });
 
     renderSlider();
-    scheduleApply(0);
+    // Saving preferences alone must not start capture on an untouched tab.
+    if (tabEngaged || !isNeutral()) scheduleApply(0);
     closePanel(els.settingsPanel, els.settingsBtn);
     sendRuntime({ type: "SS_REFRESH_BADGE" });
   });

@@ -205,7 +205,8 @@ function stopTab(tabId) {
 }
 
 async function refreshBadge() {
-  if (!ACTION) return;
+  // Firefox for Android has no toolbar badge.
+  if (!ACTION || typeof ACTION.setBadgeText !== "function") return;
   if (!showBadge) {
     ACTION.setBadgeText({ text: "" });
     return;
@@ -213,7 +214,9 @@ async function refreshBadge() {
 
   const tabs = await tabsQuery({ audible: true });
   const text = tabs.length > 0 ? String(tabs.length) : "";
-  ACTION.setBadgeBackgroundColor({ color: "#00d084" });
+  if (typeof ACTION.setBadgeBackgroundColor === "function") {
+    ACTION.setBadgeBackgroundColor({ color: "#00d084" });
+  }
   ACTION.setBadgeText({ text });
 }
 

@@ -11,7 +11,7 @@
   - after whole-tab START succeeds, background sends `SS_CONTENT_RESET` (prevents double boost)
 - Firefox:
   - `manifest.firefox.json`
-  - `background.js` as background script
+  - `background.firefox.js` as background script (event page)
   - `content.js` media-element/page-WebAudio processor
   - passive until `SS_CONTENT_APPLY`; `SS_CONTENT_STATUS` never hooks
   - hooks only CORS-readable media (same-origin, blob:, data:, MediaStream, crossorigin attr) into a running AudioContext
@@ -32,6 +32,9 @@
   - volume cut/mute on element; boost/EQ via page-world WebAudio when readable (not DRM; blob/same-origin/CORS)
   - managed elements: `volume` accessor stores page value, outputs page value x SoundSphere level (Spotify re-applies its own volume)
   - bridge: content -> page `SoundSphere/SS_MAIN_SETTINGS`; page -> content `SoundSphereMain/SS_MAIN_STATUS` {media, hooked, readable, drm}
+  - bus output uses native `AudioNode.connect` captured at load (bypasses webaudio_tap.js reroute)
+- Page WebAudio tap (`inject/webaudio_tap.js`): injected on first apply; drops AudioContexts when they close
+- Packaging (`tools/package-1.3.sh`): Chrome zip = shared + background.js + offscreen + inject/webaudio_tap.js; Firefox xpi = shared + background.firefox.js + inject/{webaudio_tap,media_main}.js; manifest.firefox.json -> manifest.json
 - Messaging:
   - backgrounds accept control messages only from extension pages (`sender.url`)
   - tab messages time out after 2 s

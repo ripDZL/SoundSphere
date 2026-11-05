@@ -75,3 +75,10 @@
 - media_main.js: diagnostics block + `__soundSphereDebug` removed; only `play()` wrapper + volume accessor remain.
 - Tests: diagnostics test replaced by guard; 2 popup tests (locked/unlocked). 46/46.
 - Next: owner tests 1.3.8 Firefox Spotify (controls greyed + note), YouTube/Bandcamp/SoundCloud unchanged; Chrome unchanged.
+
+## 1.3.1 store candidate (2026-11-04)
+
+- Owner: 1.3.0 last submitted to both stores; relabel current build 1.3.1; clean repo; review for CWS + AMO; update README.
+- Done: cleanup (restore point 66de83e), version 1.3.1, review fixes (see PROGRESS), privacy.html, README, `Docs/STORE_SUBMISSION.md`.
+- Considered and reverted: DNR `initiatorDomains` scoping (risk of breaking Bandcamp unlock untested in Firefox).
+- Next: owner side-loads beta 1.3.1 (Chrome + Firefox), smoke test YouTube/Bandcamp/SoundCloud/Spotify, then submits using STORE_SUBMISSION.md.
