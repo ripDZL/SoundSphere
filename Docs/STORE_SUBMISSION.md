@@ -23,15 +23,15 @@ Previous store version: 1.3.0 (both stores).
 - Accessibility: status updates announced to screen readers, keyboard focus kept in the tab list.
 
 ## Chrome Web Store dashboard
-**Single purpose:** Adjust the volume (including boost above 100%) and equalization of audio playing in browser tabs.
+**Single purpose:** SoundSphere lets users control the audio of their browser tabs from the toolbar: see which tabs are playing audio and adjust a tab's volume (including boosting above 100%), mute and EQ.
 
-**Permission justifications**
-- `tabCapture`: Captures the audio of the tab the user is controlling so its volume and EQ can be changed. Started only after the user interacts with the popup.
-- `offscreen`: Hosts the Web Audio graph that processes the captured tab audio and plays it back (reason USER_MEDIA). Closed automatically when no tab is being processed.
-- `activeTab`: Grants capture of the tab the user opened the popup on.
-- `tabs`: Lists tabs that are currently playing audio (title and icon in the popup) and switches to a tab when the user clicks it.
-- `storage`: Saves the user's volume, EQ and option preferences.
-- Host permission `<all_urls>`: Fallback audio control through a content script on pages where tab capture is unavailable; users play audio on arbitrary sites, so no fixed list is possible. No page data is read or transmitted.
+**Permission justifications** (pasted into the dashboard for 1.3.1)
+- `activeTab`: When the user opens the SoundSphere popup on a tab and changes a setting, activeTab grants access to that tab only, which chrome.tabCapture requires in order to capture the tab's audio for local volume and EQ processing. SoundSphere does nothing to the tab until the user moves a control.
+- `offscreen`: SoundSphere uses an offscreen document to host a Web Audio graph that processes the captured tab audio (gain/boost, 10-band EQ, and dynamics compression). A service worker cannot run Web Audio or hold a MediaStream, so the offscreen document is required to apply the user's volume and EQ settings to the audio via chrome.tabCapture. It is closed automatically when no tab is being processed.
+- `storage`: Saves the user's SoundSphere preferences: volume per tab, mode, EQ settings and options (badge, overdrive, remember volume). Stored with chrome.storage; if the user has Chrome sync turned on, Chrome may sync these preferences between the user's own devices. Nothing is sent to the developer or any third party.
+- `tabCapture`: tabCapture is SoundSphere's main audio path in Chrome. After the user changes the volume, mode or EQ in the popup, it captures that tab's audio so the volume boost and 10-band EQ can be applied locally. This works on any site, including players where in-page volume control is unreliable or protected (for example Spotify Web). Audio is only processed and played back in real time; it is never recorded, saved or sent anywhere. No video or page content is captured, and capture ends when the tab is closed.
+- `tabs`: Lists the tabs that are currently playing audio (title and favicon) in the popup and switches to a tab when the user clicks it, so the user can find and adjust a noisy tab.
+- Host permission (`<all_urls>`, also the content script match): Users can play audio on any website, so no fixed list of sites is possible. The content script is SoundSphere's fallback audio controller for tabs where tab capture isn't available, for example a tab picked from SoundSphere's playing-tabs list instead of the tab the popup was opened on (activeTab covers only that tab). It stays passive until the user changes a setting in the popup, then adjusts only the page's own audio and video elements (volume, mute, and local Web Audio boost/EQ). It does not read page text or user data, makes no network requests, and nothing leaves the device.
 
 **Remote code:** No, all code is in the package.
 
