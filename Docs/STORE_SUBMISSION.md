@@ -46,3 +46,55 @@ Previous store version: 1.3.0 (both stores).
 - `inject/webaudio_tap.js` (web-accessible, injected after the user applies settings): routes page Web Audio output through a gain/EQ chain for sites that play via Web Audio.
 - `data_collection_permissions`: `none`. No network requests are made by the extension.
 - Test: open a YouTube video, open the popup, move the slider above 100% and try Voice/Bass/EQ. Bandcamp: same on any album page (track reloads once, then boosts).
+
+## Chrome Web Store listing — Overview (1.3.1)
+Old listing (1.3.0) was wrong: claimed a `scripting` permission (not requested), "does not request broad host permissions" (manifest has `<all_urls>`), and a "Speech" preset (it's "Vocal").
+
+```
+SoundSphere: per-tab volume booster and 10-band equalizer
+
+Boost quiet tabs up to 800%, shape the sound with Voice and Bass modes or a 10-band EQ, and see every tab that's playing audio. Each tab is controlled on its own, without touching your system volume, and all processing happens locally in your browser.
+
+NEW IN 1.3.1
+• 100% with a flat EQ now sounds exactly like SoundSphere being off
+• Opening the popup no longer changes a tab's audio on its own
+• Fixed audio that could double up when moving the slider quickly
+• The audio engine shuts down when nothing is boosted, saving memory
+• Remembered tab volumes no longer carry over to unrelated tabs after a browser restart
+• Better screen reader and keyboard support
+
+KEY FEATURES
+• Volume from 0% to 800% per tab (600% max if you turn off overdrive)
+• A soft limiter keeps boosted audio from clipping harshly
+• Quick modes: Default, Voice (clearer speech), Bass (more low end)
+• 10-band EQ (31 Hz to 16 kHz) with presets: Flat, Rock, Pop, Hip-Hop, Jazz, Classical, Electronic, Vocal, Live Clean, Bass Boost, Treble Boost, V-Shape, plus your own custom setting
+• Keeps working when you switch tabs or windows
+• Works on any site that plays audio, including streaming services with protected playback such as Spotify
+• List of tabs playing audio with titles and icons; click one to jump to it
+• Optional toolbar badge showing how many tabs are playing
+• Remember volume per tab or use one global volume; option to start new tabs at 100%
+
+HOW IT WORKS
+1. Open the SoundSphere popup on the tab you want to adjust.
+2. Move the slider, pick a mode or set the EQ. SoundSphere then captures that tab's audio and processes it locally.
+Opening the popup alone changes nothing. If tab capture isn't available for a tab, SoundSphere controls the page's audio and video players directly instead; if a site blocks processing there, you get 0-100% volume and mute. Browser pages (such as chrome:// pages and the Chrome Web Store) can't be controlled.
+
+PERMISSIONS EXPLAINED
+• activeTab: works with the tab you open the popup on
+• tabCapture: captures that tab's audio so volume and EQ can be applied locally
+• offscreen: runs the hidden audio processor that Manifest V3 requires; it closes when no tab is being processed
+• tabs: finds tabs that are playing audio and shows their titles and icons
+• storage: saves your settings, EQ choices and volume preferences
+• Access to all websites ("Read and change all your data on all websites"): lets the fallback audio controller run on whichever site you use SoundSphere on. It only looks at the page's audio and video players; nothing from the page is stored or sent anywhere.
+
+PRIVACY
+• All audio processing happens on your device; audio is never recorded or saved
+• No analytics, tracking, ads or remote code
+• SoundSphere makes no network requests; settings stay in your browser's storage
+• Privacy policy: https://ripdzl.github.io/SoundSphere/privacy.html
+
+Also available for Firefox: https://addons.mozilla.org/en-US/firefox/addon/soundsphere/
+
+SAFETY NOTE
+High boost levels can distort audio and may damage hearing or speakers. Start low, especially with headphones.
+```
