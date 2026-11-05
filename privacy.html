@@ -21,7 +21,7 @@
 <ul>
 <li><strong>activeTab, tabs</strong>: control the tab you choose and list tabs that are currently playing audio (title and icon shown only in the popup).</li>
 <li><strong>storage</strong>: save the preferences described above.</li>
-<li><strong>Access to websites</strong>: adjust audio on the sites where you use SoundSphere. Page content is not read or collected.</li>
+<li><strong>Access to websites</strong> (Firefox only): adjust the page's audio and video players on the sites where you use SoundSphere. Page content is not read or collected. The Chrome version requests no website access.</li>
 <li><strong>tabCapture, offscreen</strong> (Chrome): process the selected tab's audio locally after you use the popup.</li>
 <li><strong>declarativeNetRequestWithHostAccess</strong> (Firefox): when you boost a tab whose audio is served from another domain without CORS headers, SoundSphere adds a CORS header to media responses in that tab only, so the audio can be processed locally. The rule is removed when the tab closes and never outlives the browser session.</li>
 </ul>

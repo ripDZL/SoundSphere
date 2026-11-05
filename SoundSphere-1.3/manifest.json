@@ -31,31 +31,5 @@
     "tabCapture",
     "tabs"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": true,
-      "match_about_blank": true
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "inject/webaudio_tap.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ],
   "options_page": "options.html"
 }

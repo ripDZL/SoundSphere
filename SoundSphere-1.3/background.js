@@ -1,13 +1,14 @@
 "use strict";
 
 /*
-  SoundSphere 1.3 background coordinator.
+  SoundSphere 1.3 background coordinator (Chrome).
 
-  Chrome path:
     popup -> service worker -> tabCapture stream id -> offscreen WebAudio engine
 
-  Firefox / fallback path:
-    popup -> background/event page -> content script media-element processor
+  Chrome needs no host permissions or content scripts: opening the popup grants
+  activeTab for that tab, which is all tabCapture requires. A tab picked from
+  the playing-tabs list has no grant, so the user is asked to open SoundSphere
+  on it. (Firefox uses background.firefox.js + content.js instead.)
 
   The service worker is intentionally stateless for live audio. Chrome may stop
   it after idle time, so the offscreen document owns active streams and nodes.
@@ -75,18 +76,6 @@ function tabsQuery(queryInfo) {
 
 function tabsGet(tabId) {
   return withCallback(chrome.tabs.get, chrome.tabs, tabId).catch(() => null);
-}
-
-const TAB_MESSAGE_TIMEOUT_MS = 2000;
-
-// Bounded so a page that never answers can't stall the per-tab queue.
-function sendTabMessage(tabId, message) {
-  const reply = withCallback(chrome.tabs.sendMessage, chrome.tabs, tabId, message)
-    .catch(error => ({ ok: false, error: error.message || String(error) }));
-  const timeout = new Promise(resolve => {
-    setTimeout(() => resolve({ ok: false, error: "Page did not respond" }), TAB_MESSAGE_TIMEOUT_MS);
-  });
-  return Promise.race([reply, timeout]);
 }
 
 function runtimeSendMessage(message) {
@@ -237,7 +226,7 @@ async function getMediaStreamId(tabId) {
 async function startOrUpdateChromeCapture(tabId, settings) {
   const tab = await tabsGet(tabId);
   if (!tab || isRestrictedUrl(tab.url)) {
-    throw new Error("This browser page cannot be captured");
+    throw new Error("Browser pages cannot be controlled");
   }
 
   const existing = await sendToOffscreen({ type: "SS_OFFSCREEN_STATUS", tabId }).catch(() => null);
@@ -248,45 +237,28 @@ async function startOrUpdateChromeCapture(tabId, settings) {
   const streamId = await getMediaStreamId(tabId);
   if (!streamId) throw new Error("Chrome did not grant a tab audio stream");
 
-  const started = await sendToOffscreen({
+  return sendToOffscreen({
     type: "SS_OFFSCREEN_START",
     tabId,
     streamId,
     settings
   });
-
-  // If this tab was previously handled by the content fallback, neutralize it
-  // now that whole-tab capture owns the audio; otherwise boost/EQ stack twice.
-  if (started && started.ok) {
-    await sendTabMessage(tabId, { type: "SS_CONTENT_RESET" });
-  }
-  return started;
 }
 
-async function applyContentFallback(tabId, settings, reason) {
-  const response = await sendTabMessage(tabId, {
-    type: "SS_CONTENT_APPLY",
-    settings,
-    reason: reason || ""
-  });
+function unsupported(reason) {
+  return { ok: false, mode: "unsupported", canBoost: false, advanced: false, captureActive: false, engaged: false, reason };
+}
 
-  if (!response || response.ok === false) {
-    return {
-      ok: false,
-      mode: "unsupported",
-      canBoost: false,
-      advanced: false,
-      reason: reason || (response && response.error) || "No content-script audio processor on this page"
-    };
+// Turn Chrome's capture errors into something the user can act on.
+function captureErrorReason(error) {
+  const message = error && error.message ? error.message : String(error);
+  if (/not been invoked|activeTab/i.test(message)) {
+    return "Click the SoundSphere icon while on this tab to control it.";
   }
-
-  return {
-    ok: true,
-    mode: response.backend || "basic",
-    canBoost: !!response.canBoost,
-    advanced: !!response.canBoost,
-    reason: reason || response.reason || ""
-  };
+  if (/active stream/i.test(message)) {
+    return "Another app or extension is already capturing this tab's audio.";
+  }
+  return message;
 }
 
 function applySettings(tabId, settings) {
@@ -297,20 +269,18 @@ function applySettings(tabId, settings) {
 }
 
 async function applySettingsNow(tabId, settings) {
-  if (canUseChromeTabCapture()) {
-    try {
-      const response = await startOrUpdateChromeCapture(tabId, settings);
-      if (response && response.ok) {
-        return { ok: true, mode: "whole-tab", canBoost: true, advanced: true };
-      }
-      throw new Error((response && response.error) || "Offscreen audio engine failed");
-    } catch (error) {
-      const reason = error && error.message ? error.message : String(error);
-      return applyContentFallback(tabId, settings, reason);
-    }
+  if (!canUseChromeTabCapture()) {
+    return unsupported("Tab capture is not available in this browser (Chrome 116+ required).");
   }
-
-  return applyContentFallback(tabId, settings, "Whole-tab capture is not available in this browser");
+  try {
+    const response = await startOrUpdateChromeCapture(tabId, settings);
+    if (response && response.ok) {
+      return { ok: true, mode: "whole-tab", canBoost: true, advanced: true };
+    }
+    throw new Error((response && response.error) || "Offscreen audio engine failed");
+  } catch (error) {
+    return unsupported(captureErrorReason(error));
+  }
 }
 
 async function getStatus(tabId) {
@@ -318,62 +288,31 @@ async function getStatus(tabId) {
     return { ok: false, mode: "unsupported", canBoost: false, reason: "No active tab" };
   }
 
-  if (canUseChromeTabCapture()) {
-    const tab = await tabsGet(tabId);
-    if (!tab || isRestrictedUrl(tab.url)) {
-      return {
-        ok: false,
-        mode: "unsupported",
-        canBoost: false,
-        advanced: false,
-        captureActive: false,
-        engaged: false,
-        reason: "Browser pages cannot be controlled"
-      };
-    }
-
-    const offscreen = await sendToOffscreenIfPresent({ type: "SS_OFFSCREEN_STATUS", tabId });
-    const captureActive = !!(offscreen && offscreen.active);
-    const content = captureActive ? null : await sendTabMessage(tabId, { type: "SS_CONTENT_STATUS" });
-    const fallbackEngaged = !!(content && content.ok !== false && content.engaged);
-    return {
-      ok: true,
-      mode: captureActive ? "whole-tab" : (fallbackEngaged ? (content.backend || "basic") : "ready"),
-      canBoost: fallbackEngaged ? !!content.canBoost : true,
-      advanced: fallbackEngaged ? !!content.canBoost : true,
-      captureActive,
-      engaged: captureActive || fallbackEngaged,
-      reason: fallbackEngaged ? (content.reason || "") : ""
-    };
+  if (!canUseChromeTabCapture()) {
+    return unsupported("Tab capture is not available in this browser (Chrome 116+ required).");
   }
 
-  const content = await sendTabMessage(tabId, { type: "SS_CONTENT_STATUS" });
-  if (content && content.ok !== false) {
-    return {
-      ok: true,
-      mode: content.backend || "basic",
-      canBoost: !!content.canBoost,
-      advanced: !!content.canBoost,
-      captureActive: false,
-      engaged: !!content.engaged,
-      reason: content.reason || ""
-    };
+  const tab = await tabsGet(tabId);
+  if (!tab || isRestrictedUrl(tab.url)) {
+    return unsupported("Browser pages cannot be controlled");
   }
 
+  const offscreen = await sendToOffscreenIfPresent({ type: "SS_OFFSCREEN_STATUS", tabId });
+  const captureActive = !!(offscreen && offscreen.active);
   return {
-    ok: false,
-    mode: "unsupported",
-    canBoost: false,
-    advanced: false,
-    captureActive: false,
-    reason: content && content.error ? content.error : "Cannot control this page"
+    ok: true,
+    mode: captureActive ? "whole-tab" : "ready",
+    canBoost: true,
+    advanced: true,
+    captureActive,
+    engaged: captureActive,
+    reason: ""
   };
 }
 
 function stopTab(tabId) {
   return runForTab(tabId, async () => {
     await sendToOffscreenIfPresent({ type: "SS_OFFSCREEN_STOP", tabId });
-    await sendTabMessage(tabId, { type: "SS_CONTENT_RESET" });
     scheduleOffscreenIdleClose();
     return { ok: true };
   });

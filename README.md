@@ -43,7 +43,7 @@ A soft limiter keeps boosted audio from hard-clipping.
 ---
 
 ## How it works
-- **Chrome:** captures the tab you're on (after you use the popup) and processes it in a hidden audio page. Works on any site that plays audio, including protected services such as Spotify.
+- **Chrome:** captures the tab you're on (after you use the popup) and processes it in a hidden audio page. Works on any site that plays audio, including protected services such as Spotify, without any access to website data. To adjust a tab from the playing-tabs list, switch to it and click the SoundSphere icon.
 - **Firefox:** Firefox has no tab capture for extensions, so SoundSphere processes the page's own `<audio>`/`<video>` elements. When a site serves audio from another domain without CORS headers (e.g. Bandcamp), SoundSphere briefly reloads the track with CORS allowed for that tab so it can be boosted.
 
 ### Protected (DRM) audio in Firefox
@@ -56,8 +56,8 @@ Firefox does not let extensions process DRM-protected audio (Widevine/EME, e.g. 
 |---|---|
 | `activeTab`, `tabs` | Control the tab you pick; list tabs playing audio |
 | `storage` | Save your settings |
-| Access to all websites | Adjust audio on whichever site you use it on |
-| `tabCapture`, `offscreen` (Chrome) | Process the tab's audio locally |
+| Access to all websites (Firefox) | Adjust the page's audio and video players on whichever site you use it on |
+| `tabCapture`, `offscreen` (Chrome) | Process the tab's audio locally; Chrome needs no website access |
 | `declarativeNetRequestWithHostAccess` (Firefox) | Add a CORS header to media in a boosted tab only, so cross-domain audio can be processed; removed when the tab closes |
 
 - No analytics, telemetry, ads or remote code

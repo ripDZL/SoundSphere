@@ -8,7 +8,7 @@
   - one WebAudio graph per captured tab: gain -> mode -> 10x EQ -> compressor -> clip pre-gain (1/4) -> soft clip -> destination
   - background serializes apply/stop per tab (`runForTab`); offscreen drops superseded starts (`startTokens`)
   - status/stop never create the offscreen doc; doc closes 15 s after last capture ends
-  - after whole-tab START succeeds, background sends `SS_CONTENT_RESET` (prevents double boost)
+  - no host permissions/content scripts: activeTab (popup open) is the only grant; capture errors mapped to user-facing reasons (`captureErrorReason`)
 - Firefox:
   - `manifest.firefox.json`
   - `background.firefox.js` as background script (event page)
@@ -47,7 +47,7 @@
   - `mode`, `eqGains`, `eqPreset`, `eqCustomGains`
   - `showBadge`, `rememberVolume`, `startAt100`, `overdrive`
 - Fallback order:
-  - Chrome whole-tab capture
-  - media-element WebAudio
+  - Chrome: whole-tab capture only (else unsupported + reason)
+  - Firefox: media-element WebAudio
   - page WebAudio tap
   - basic 0-100 element volume

@@ -10,7 +10,8 @@ Previous store version: 1.3.0 (both stores).
 - No remote code, eval, `new Function`, `innerHTML`, or network requests in any source file.
 - Debug logging off (`DEBUG_LOG = false` in content.js and inject/media_main.js).
 - Font license shipped: `fonts/OFL.txt` (JetBrains Mono, SIL OFL 1.1).
-- Permission changes vs 1.3.0: Chrome none; Firefox adds `declarativeNetRequestWithHostAccess` (no extra install prompt; covered by existing host access).
+- Permission changes vs 1.3.0: Chrome drops all host access (`<all_urls>` host permission, content script, web-accessible resource) after the CWS "Broad Host Permissions" warning; Firefox adds `declarativeNetRequestWithHostAccess` (no extra install prompt; covered by existing host access).
+- Chrome .zip verified in Chromium: `chrome.permissions.getAll().origins` is empty; applying to a tab without an activeTab grant returns "Click the SoundSphere icon while on this tab to control it."
 
 ## Release notes (both stores)
 - Fixed: boost could double up or briefly play audio twice when moving the slider quickly (Chrome).
@@ -31,7 +32,7 @@ Previous store version: 1.3.0 (both stores).
 - `storage`: Saves the user's SoundSphere preferences: volume per tab, mode, EQ settings and options (badge, overdrive, remember volume). Stored with chrome.storage; if the user has Chrome sync turned on, Chrome may sync these preferences between the user's own devices. Nothing is sent to the developer or any third party.
 - `tabCapture`: tabCapture is SoundSphere's main audio path in Chrome. After the user changes the volume, mode or EQ in the popup, it captures that tab's audio so the volume boost and 10-band EQ can be applied locally. This works on any site, including players where in-page volume control is unreliable or protected (for example Spotify Web). Audio is only processed and played back in real time; it is never recorded, saved or sent anywhere. No video or page content is captured, and capture ends when the tab is closed.
 - `tabs`: Lists the tabs that are currently playing audio (title and favicon) in the popup and switches to a tab when the user clicks it, so the user can find and adjust a noisy tab.
-- Host permission (`<all_urls>`, also the content script match): Users can play audio on any website, so no fixed list of sites is possible. The content script is SoundSphere's fallback audio controller for tabs where tab capture isn't available, for example a tab picked from SoundSphere's playing-tabs list instead of the tab the popup was opened on (activeTab covers only that tab). It stays passive until the user changes a setting in the popup, then adjusts only the page's own audio and video elements (volume, mute, and local Web Audio boost/EQ). It does not read page text or user data, makes no network requests, and nothing leaves the device.
+- Host permission: none in 1.3.1 (field disappears once the new package is uploaded).
 
 **Remote code:** No, all code is in the package.
 
@@ -77,7 +78,7 @@ KEY FEATURES
 HOW IT WORKS
 1. Open the SoundSphere popup on the tab you want to adjust.
 2. Move the slider, pick a mode or set the EQ. SoundSphere then captures that tab's audio and processes it locally.
-Opening the popup alone changes nothing. If tab capture isn't available for a tab, SoundSphere controls the page's audio and video players directly instead; if a site blocks processing there, you get 0-100% volume and mute. Browser pages (such as chrome:// pages and the Chrome Web Store) can't be controlled.
+Opening the popup alone changes nothing. To adjust a tab you found in the playing-tabs list, switch to it and click the SoundSphere icon there. Browser pages (such as chrome:// pages and the Chrome Web Store) can't be controlled.
 
 PERMISSIONS EXPLAINED
 • activeTab: works with the tab you open the popup on
@@ -85,7 +86,7 @@ PERMISSIONS EXPLAINED
 • offscreen: runs the hidden audio processor that Manifest V3 requires; it closes when no tab is being processed
 • tabs: finds tabs that are playing audio and shows their titles and icons
 • storage: saves your settings, EQ choices and volume preferences
-• Access to all websites ("Read and change all your data on all websites"): lets the fallback audio controller run on whichever site you use SoundSphere on. It only looks at the page's audio and video players; nothing from the page is stored or sent anywhere.
+SoundSphere does not ask for access to your data on websites and runs no scripts in web pages.
 
 PRIVACY
 • All audio processing happens on your device; audio is never recorded or saved

@@ -4,7 +4,8 @@
 - Current milestone: SoundSphere 1.3.1 store candidate (1.3.0 = last submitted to both stores). Internal betas 1.3.2-1.3.8 were pre-release iterations, folded into 1.3.1.
 - Store notes: `Docs/STORE_SUBMISSION.md` (permission justifications, AMO reviewer notes, release notes).
 - New package path: `SoundSphere-1.3/`.
-- Chrome target: MV3, Chrome 116+, `tabCapture` + offscreen WebAudio.
+- Chrome target: MV3, Chrome 116+, `tabCapture` + offscreen WebAudio. No host permissions, content scripts or WAR (removed 2026-11-05 after CWS "Broad Host Permissions" in-depth-review warning; owner chose this). Tab picked from the list needs the toolbar icon clicked on it (activeTab).
+- Rule: content.js, inject/* and background.firefox.js are Firefox-only; package script keeps them out of the Chrome zip.
 - Firefox target: MV3 package manifest with content-script media processing fallback, Firefox 140+ for AMO data-consent support.
 - Repo cleaned 2026-11-04: legacy `Chrome/`, `FireFox/`, `backup/`, old `beta/` builds, `beta/SoundSphere-2.0-inc1b`, 1.3.0 zips removed. Restore from commit 66de83e (`git checkout 66de83e -- <path>`). Tag push blocked by session policy.
 - `beta/` holds only the current build (CI wipes it before packaging). Unused icons live in `store-assets/icons/` (not packaged).

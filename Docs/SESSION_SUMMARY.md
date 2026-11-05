@@ -82,3 +82,4 @@
 - Done: cleanup (restore point 66de83e), version 1.3.1, review fixes (see PROGRESS), privacy.html, README, `Docs/STORE_SUBMISSION.md`.
 - Considered and reverted: DNR `initiatorDomains` scoping (risk of breaking Bandcamp unlock untested in Firefox).
 - Next: owner side-loads beta 1.3.1 (Chrome + Firefox), smoke test YouTube/Bandcamp/SoundCloud/Spotify, then submits using STORE_SUBMISSION.md.
+- 2026-11-05: Firefox 1.3.1 live on AMO. CWS showed "Broad Host Permissions" warning; Chrome build now has no host access. Owner re-uploads Chrome zip, removes host justification, updates Overview (HOW IT WORKS + PERMISSIONS sections in STORE_SUBMISSION.md).

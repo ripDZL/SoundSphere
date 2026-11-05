@@ -467,10 +467,9 @@ function findNode(world, kind) {
     ]);
     await tick(150);
     const live = env.liveContexts().length;
-    const fallbacks = env.tabMessages.filter(m => m.message.type === "SS_CONTENT_APPLY").length;
     assert(env.streamIdCalls === 1, `getMediaStreamId called ${env.streamIdCalls}x, graphs built ${env.world.contexts.length - before}`);
     assert(live === 2, `live AudioContexts=${live} (expected 2: one per tab)`);
-    assert(fallbacks === 0, `content fallback triggered ${fallbacks}x`);
+    assert(env.tabMessages.length === 0, `page messages sent: ${env.tabMessages.length}`);
     assert(r.every(x => x && x.mode === "whole-tab"), "modes=" + r.map(x => x && x.mode).join(","));
   });
 
@@ -489,15 +488,15 @@ function findNode(world, kind) {
     assert(left === 0, `stale vol_tabs entries=${left}`);
   });
 
-  await test("chrome: content fallback reset once whole-tab capture succeeds", async () => {
-    const env = makeChromeEnv({ invokedTabs: [], contentListener: () => ({ ok: true, backend: "media-element", canBoost: true }) });
-    await env.send({ type: "SS_APPLY_SETTINGS", tabId: 1, settings: boost }, popupSender);
-    env.invokedTabs.add(1);
+  await test("chrome: tab without activeTab grant says how to enable it, then captures once invoked", async () => {
+    const env = makeChromeEnv({ invokedTabs: [] });
     const r = await env.send({ type: "SS_APPLY_SETTINGS", tabId: 1, settings: boost }, popupSender);
-    await tick(20);
-    assert(r && r.mode === "whole-tab", "second apply mode=" + (r && r.mode));
-    const resets = env.tabMessages.filter(m => m.message.type === "SS_CONTENT_RESET").length;
-    assert(resets >= 1, "no SS_CONTENT_RESET after capture took over");
+    assert(r && r.mode === "unsupported" && !r.canBoost, "result=" + JSON.stringify(r));
+    assert(/SoundSphere icon/.test(r.reason || ""), "unhelpful reason: " + (r && r.reason));
+    env.invokedTabs.add(1); // user clicks the toolbar icon on that tab
+    const r2 = await env.send({ type: "SS_APPLY_SETTINGS", tabId: 1, settings: boost }, popupSender);
+    assert(r2 && r2.mode === "whole-tab", "after invoke mode=" + (r2 && r2.mode));
+    assert(env.tabMessages.length === 0, "messaged a page without a content script");
   });
 
   await test("chrome: restricted page reports unsupported", async () => {
@@ -903,6 +902,15 @@ function findNode(world, kind) {
     assert(main.length === 1 && main[0].matches.every(m => allowed.includes(m)), JSON.stringify(main));
     const cr = JSON.parse(fs.readFileSync(path.join(DIR, "manifest.json"), "utf8"));
     assert(!(cr.content_scripts || []).some(c => c.world === "MAIN"), "MAIN world script in Chrome manifest");
+  });
+
+  await test("manifest: Chrome build asks for no host access (activeTab + tabCapture only)", async () => {
+    const fs = require("fs");
+    const cr = JSON.parse(fs.readFileSync(path.join(DIR, "manifest.json"), "utf8"));
+    assert(!cr.host_permissions && !cr.content_scripts && !cr.web_accessible_resources, "host access in Chrome manifest");
+    assert(!(cr.permissions || []).some(p => /:\/\/|<all_urls>/.test(p)), "host pattern in permissions");
+    const bg = fs.readFileSync(path.join(DIR, "background.js"), "utf8");
+    assert(!/tabs\.sendMessage/.test(bg), "Chrome background still messages content scripts");
   });
 
   // ---------------- popup
