@@ -48,3 +48,4 @@
 - 1.3.7: read-only diagnostics in media_main.js (capture/WebAudio counters, `__soundSphereDebug()` report). Harness 44/44; lint 0/0/0.
 - 1.3.7 owner: Spotify Firefox volume works; EQ/Voice/Bass no effect (DRM limit).
 - 1.3.8: popup locks Default/Voice/Bass + EQ (sliders, preset, reset) when `canBoost` false; note under modes + in EQ panel. Diagnostics removed from media_main.js; guard test (audio prototypes untouched, no debug global). Harness 46/46.
+- 1.3.8 owner (Firefox): Spotify DRM grey-out confirmed working.
