@@ -148,6 +148,7 @@ async function applySettingsNow(tabId, settings) {
   if (corsUnlock && response && response.corsUnlockNeeded) {
     try {
       await ensureCorsRule(tabId);
+      console.info("[SoundSphere] CORS header rule active for tab", tabId);
       const unlocked = await sendTabMessage(
         tabId,
         { type: "SS_CONTENT_CORS_RELOAD", corsUnlock },
@@ -155,7 +156,7 @@ async function applySettingsNow(tabId, settings) {
       );
       if (unlocked && unlocked.ok !== false) response = unlocked;
     } catch (error) {
-      console.debug("SoundSphere CORS unlock failed:", error && error.message);
+      console.info("[SoundSphere] CORS unlock failed:", error && error.message);
     }
   }
   return toPopupResult(response);

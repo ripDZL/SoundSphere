@@ -30,3 +30,10 @@
 - Reference add-on studied only by listing (no public source, GPLv3); implementation is SoundSphere's own.
 - Unverified in real Firefox: DNR header + CORS reload on Bandcamp; exportFunction hook on Spotify.
 - Next step: manual Firefox test (Bandcamp boost, Spotify volume/mute, YouTube regression).
+
+## 1.3.3 (2026-11-04)
+
+- Bandcamp break hypothesis: failed CORS-mode reload fired `error` on the site's `<audio>`; player treated track as dead.
+- Fix: probe first; real player only reloaded after probe loads metadata in CORS mode.
+- Spotify: player created via `document.createElement`, kept detached (per spotitySpeedExtension, KDE D13878); now hooked at creation.
+- Evidence needed if still failing: page console `[SoundSphere]` lines on Bandcamp/Spotify + background console (about:debugging > Inspect).

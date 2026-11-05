@@ -18,9 +18,11 @@
   - late media hooked on capture-phase `play` (no MutationObserver)
   - basic mode scales relative to player volume, never above it; reset restores volume/mute
   - frame replies: media frames answer, top frame answers late, other frames stay silent
-  - Firefox: `exportFunction` wraps page `HTMLMediaElement.prototype.play` to track off-DOM/shadow media (Spotify), max 64 WeakRefs
+  - Firefox: `exportFunction` wraps page `HTMLMediaElement.prototype.play` to track off-DOM/shadow media, max 64 WeakRefs;
+    on open.spotify.com also wraps `Document.prototype.createElement` (player created detached, sometimes `<audio>`)
   - Firefox CORS unlock: on boost/EQ/mode with cross-origin non-CORS media, background adds DNR session rule
-    (id = tabId, tabIds [tabId], resourceTypes media, set `Access-Control-Allow-Origin: *`), content reloads element with
+    (id = tabId, tabIds [tabId], resourceTypes media, set `Access-Control-Allow-Origin: *`), content first probes the URL with a
+    detached muted CORS `<audio>` (metadata only); only if it loads does it reload the real element with
     `crossOrigin="anonymous"` (position/play kept), hooks after `loadedmetadata`; error/5 s timeout reverts; rule removed on tab close
 - Shared UI:
   - `popup.*`

@@ -26,6 +26,14 @@ const IS_TOP_FRAME = (() => {
   try { return window.top === window; } catch { return false; }
 })();
 
+// Diagnostics for beta builds: decisions on the CORS / off-DOM paths only
+// (rare events, never per-sample). Visible in the page's web console.
+const DEBUG_LOG = true;
+function ssLog(...args) {
+  if (!DEBUG_LOG) return;
+  try { console.info("[SoundSphere]", ...args); } catch {}
+}
+
 const drmState = {
   inUse: false,
   encryptedEvent: false,
@@ -107,6 +115,44 @@ function needsProcessing(settings) {
 const CORS_RELOAD_TIMEOUT_MS = 5000;
 const corsPending = new WeakSet(); // elements mid-reload: never hook yet
 
+// Check that a URL loads in CORS mode *before* touching the site's player:
+// a failed CORS load fires "error" on the element, and players such as
+// Bandcamp's treat that as a dead track even if SoundSphere then reverts.
+// The probe is a detached, muted element that only loads metadata.
+const corsProbeCache = new Map(); // url -> Promise<boolean>
+
+function probeCors(url) {
+  if (corsProbeCache.has(url)) return corsProbeCache.get(url);
+  const result = new Promise(resolve => {
+    let probe;
+    let timer = null;
+    const finish = ok => {
+      clearTimeout(timer);
+      try {
+        probe.removeAttribute("src");
+        probe.load();
+      } catch {}
+      ssLog("CORS probe", ok ? "passed" : "failed", url);
+      resolve(ok);
+    };
+    try {
+      probe = document.createElement("audio");
+      probe.muted = true;
+      probe.preload = "metadata";
+      probe.crossOrigin = "anonymous";
+      probe.addEventListener("loadedmetadata", () => finish(true), { once: true });
+      probe.addEventListener("error", () => finish(false), { once: true });
+      timer = setTimeout(() => finish(false), CORS_RELOAD_TIMEOUT_MS);
+      probe.src = url;
+    } catch (error) {
+      ssLog("CORS probe could not start:", error && error.message);
+      resolve(false);
+    }
+  });
+  corsProbeCache.set(url, result);
+  return result;
+}
+
 // Reload one element in CORS mode, keeping position and play state. Resolves
 // true once metadata loads (now WebAudio-readable). On error or timeout the
 // crossorigin attribute is removed and the original load restored.
@@ -153,7 +199,11 @@ function reloadWithCors(el) {
       resolve(ok);
     };
     const onLoaded = () => finish(true);
-    const onError = () => finish(false);
+    const onError = () => {
+      const code = el.error && el.error.code;
+      ssLog("CORS reload failed", code ? `(media error ${code})` : "(timeout)", state.src || "");
+      finish(false);
+    };
     const timer = setTimeout(onError, CORS_RELOAD_TIMEOUT_MS);
 
     corsPending.add(el);
@@ -409,6 +459,7 @@ function trackMedia(el) {
   if (!trackedSet.has(el)) {
     trackedSet.add(el);
     trackedMedia.push(makeRef(el));
+    if (!el.isConnected) ssLog("tracking off-DOM", String(el.tagName).toLowerCase(), "element");
     if (trackedMedia.length > OFF_DOM_LIMIT) trackedMedia.shift();
     // Off-DOM "encrypted" events never reach the document listener.
     try { el.addEventListener("encrypted", () => markDrm("encrypted"), { once: true }); } catch {}
@@ -416,24 +467,58 @@ function trackMedia(el) {
   if (onTrackedPlay) onTrackedPlay(el);
 }
 
-(function installPlayHook() {
-  if (typeof exportFunction !== "function") return;
-  let proto = null;
+// Page objects handed to us through the bridge are normalized to the content
+// script's (Xray) view so identity matches querySelectorAll results.
+function toContentView(obj) {
   try {
-    const page = window.wrappedJSObject;
-    proto = page && page.HTMLMediaElement && page.HTMLMediaElement.prototype;
+    return typeof XPCNativeWrapper === "function" ? XPCNativeWrapper(obj) : obj;
+  } catch {
+    return obj;
+  }
+}
+
+(function installMediaHooks() {
+  if (typeof exportFunction !== "function") return;
+  let page = null;
+  try {
+    page = window.wrappedJSObject;
   } catch {
     return;
   }
-  if (!proto || typeof proto.play !== "function") return;
+  const installed = { play: false, createElement: false };
 
-  const nativePlay = proto.play;
-  try {
-    exportFunction(function play(...args) {
-      try { trackMedia(this); } catch {}
-      return nativePlay.apply(this, args);
-    }, proto, { defineAs: "play" });
-  } catch {}
+  // Every element the page plays, attached or not.
+  const mediaProto = page && page.HTMLMediaElement && page.HTMLMediaElement.prototype;
+  if (mediaProto && typeof mediaProto.play === "function") {
+    const nativePlay = mediaProto.play;
+    try {
+      exportFunction(function play(...args) {
+        try { trackMedia(toContentView(this)); } catch {}
+        return nativePlay.apply(this, args);
+      }, mediaProto, { defineAs: "play" });
+      installed.play = true;
+    } catch {}
+  }
+
+  // Spotify Web creates its <video>/<audio> with document.createElement and
+  // never attaches it; catch it at creation. Limited to Spotify because
+  // createElement is a hot path on every other site.
+  const docProto = page && page.Document && page.Document.prototype;
+  if (window.location.hostname === "open.spotify.com" && docProto && typeof docProto.createElement === "function") {
+    const nativeCreate = docProto.createElement;
+    try {
+      exportFunction(function createElement(...args) {
+        const el = nativeCreate.apply(this, args);
+        try {
+          if (/^(audio|video)$/i.test(String(args[0]))) trackMedia(toContentView(el));
+        } catch {}
+        return el;
+      }, docProto, { defineAs: "createElement" });
+      installed.createElement = true;
+    } catch {}
+  }
+
+  if (installed.createElement) ssLog("media hooks installed:", JSON.stringify(installed));
 })();
 
 function mediaElements() {
@@ -544,11 +629,16 @@ class SoundSphereContentController {
   // Called by the background after it installed the tab's CORS header rule.
   async unlockCors() {
     for (const el of this.corsCandidates()) {
-      const reload = reloadWithCors(el).then(ok => {
-        this.corsReloads.delete(el);
-        if (!ok) this.corsFailed.add(el);
-        return ok;
-      });
+      const url = el.currentSrc || el.src;
+      ssLog("CORS unlock candidate:", url);
+      const reload = probeCors(url)
+        .then(probeOk => (probeOk ? reloadWithCors(el) : false))
+        .then(ok => {
+          this.corsReloads.delete(el);
+          if (!ok) this.corsFailed.add(el);
+          ssLog("CORS unlock", ok ? "succeeded" : "skipped (player left untouched)", url);
+          return ok;
+        });
       this.corsReloads.set(el, reload);
     }
     await Promise.all(Array.from(this.corsReloads.values()));
@@ -654,10 +744,16 @@ class SoundSphereContentController {
     postTapSettings(settings);
     this.syncElements(settings);
 
+    const previousBackend = this.backend;
     if (drmState.inUse) this.backend = "protected-basic";
     else if (this.hook.hookedCount > 0) this.backend = "media-element";
     else if (tapState.contexts > 0) this.backend = "page-webaudio";
     else this.backend = "basic";
+    if (this.backend !== previousBackend || !this.loggedBackend) {
+      this.loggedBackend = true;
+      ssLog("backend:", this.backend, "| media:", mediaElements().length, "| hooked:", this.hook.hookedCount,
+        "| drm:", drmState.inUse, "| context:", this.bus.ctx ? this.bus.ctx.state : "none");
+    }
 
     const result = this.status();
     // Ask the background to unlock cross-origin media only when the user

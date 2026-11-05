@@ -211,6 +211,7 @@ function makeContentEnv(opts = {}) {
   const world = makeAudioWorld({ initialState: opts.initialState, resumeWorks: opts.resumeWorks });
   const elements = opts.elements || [];
   const injected = [];
+  const probes = [];
   const docListeners = {};
   const winListeners = {};
   const runtimeListeners = makeEvent();
@@ -221,13 +222,20 @@ function makeContentEnv(opts = {}) {
     baseURI: origin + "/page",
     querySelectorAll: sel => (sel.includes("audio") || sel.includes("video") ? elements.slice() : []),
     querySelector: sel => ((sel.includes("audio") || sel.includes("video")) ? (elements[0] || null) : null),
-    createElement: tag => ({ tagName: tag.toUpperCase(), addEventListener() {}, remove() {} }),
+    createElement: tag => {
+      if (/^(audio|video)$/i.test(tag)) {
+        const probe = makeElement(tag.toUpperCase(), { isConnected: false });
+        probes.push(probe);
+        return probe;
+      }
+      return { tagName: tag.toUpperCase(), addEventListener() {}, remove() {} };
+    },
     addEventListener(t, fn) { (docListeners[t] = docListeners[t] || []).push(fn); },
     removeEventListener() {}
   };
   const win = {
     AudioContext: world.AudioContext,
-    location: { origin, href: origin + "/page" },
+    location: { origin, href: origin + "/page", hostname: new URL(origin).hostname },
     addEventListener(t, fn) { (winListeners[t] = winListeners[t] || []).push(fn); },
     removeEventListener() {},
     postMessage() {}
@@ -238,17 +246,19 @@ function makeContentEnv(opts = {}) {
   const pageProto = { play() { this.paused = false; return "native-play"; } };
   const extras = {};
   if (opts.firefox) {
-    extras.wrappedJSObject = { HTMLMediaElement: { prototype: pageProto } };
+    const pageDocProto = { createElement: tag => makeElement(String(tag).toUpperCase(), { isConnected: false }) };
+    extras.wrappedJSObject = { HTMLMediaElement: { prototype: pageProto }, Document: { prototype: pageDocProto } };
     extras.exportFunction = (fn, target, o) => { target[o.defineAs] = fn; return fn; };
   }
   const sandbox = Object.assign(win, extras, {
     document,
     chrome: { runtime: { onMessage: runtimeListeners, getURL: p => "moz-extension://uuid/" + p, id: "ext" } },
     MutationObserver: class { observe() {} disconnect() {} },
-    URL, console, setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, Map, Set, WeakMap, WeakSet, WeakRef, Symbol, Error, String, Boolean, Date, JSON
+    URL, console: Object.assign(Object.create(console), { info() {} }), // mute [SoundSphere] diagnostics
+    setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, Map, Set, WeakMap, WeakSet, WeakRef, Symbol, Error, String, Boolean, Date, JSON
   });
   loadScript(path.join(DIR, "content.js"), sandbox);
-  const env = { world, elements, injected, docListeners, sandbox, pageProto };
+  const env = { world, elements, injected, docListeners, sandbox, pageProto, probes };
   // Page code calling el.play() goes through the (possibly patched) prototype.
   env.pagePlay = el => pageProto.play.call(el);
   env.send = message => new Promise(resolve => {
@@ -595,6 +605,16 @@ function findNode(world, kind) {
     assert(el.muted === true, "mute did not reach detached element");
   });
 
+  await test("firefox: Spotify element caught at createElement (before any play)", async () => {
+    const env = makeContentEnv({ firefox: true, origin: "https://open.spotify.com", elements: [] });
+    const created = [];
+    const pageDocProto = env.sandbox.wrappedJSObject.Document.prototype;
+    const el = pageDocProto.createElement.call({}, "video");
+    el.mediaKeys = {}; el.volume = 1;
+    const r = await env.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 30 } });
+    assert(Math.abs(el.volume - 0.3) < 1e-9, "created element not controlled, volume=" + el.volume + " status=" + JSON.stringify(r.value));
+  });
+
   await test("firefox: play hook keeps page behaviour (calls native, returns its value)", async () => {
     const env = makeContentEnv({ firefox: true, elements: [] });
     const el = makeElement("AUDIO", { isConnected: false, paused: true });
@@ -630,6 +650,10 @@ function findNode(world, kind) {
     assert(r.value && r.value.corsUnlockNeeded, "unlock not requested for boost");
     const p = env.send({ type: "SS_CONTENT_CORS_RELOAD", corsUnlock: true });
     await tick(5);
+    assert(env.probes.length === 1 && env.probes[0].crossOrigin === "anonymous", "no CORS probe");
+    assert(el.crossOrigin === null, "player touched before probe passed");
+    env.probes[0]._fire("loadedmetadata");
+    await tick(5);
     assert(el.crossOrigin === "anonymous", "crossOrigin not set");
     assert(env.world.mediaSources.length === 0, "hooked before CORS load finished");
     el.currentTime = 0; el.paused = true; // reload resets the element
@@ -640,11 +664,30 @@ function findNode(world, kind) {
     assert(done.value && done.value.backend === "media-element" && done.value.canBoost, JSON.stringify(done.value));
   });
 
-  await test("cors: failed CORS load reverts to original playback", async () => {
+  await test("cors: probe fails -> player never touched (no error event for the site)", async () => {
+    const el = bandcamp();
+    let siteSawError = false;
+    el.addEventListener("error", () => { siteSawError = true; });
+    const env = makeContentEnv({ firefox: true, origin: "https://artist.bandcamp.com", elements: [el] });
+    await env.send({ type: "SS_CONTENT_APPLY", settings: boost, corsUnlock: true });
+    const p = env.send({ type: "SS_CONTENT_CORS_RELOAD", corsUnlock: true });
+    await tick(5);
+    env.probes[0]._fire("error"); // CORS headers did not take effect
+    const r = await p;
+    assert(el.crossOrigin === null && el.loads === 0 && el.src.endsWith("a.mp3"), "player was modified");
+    assert(!siteSawError, "site's player saw an error event");
+    assert(env.world.mediaSources.length === 0, "hooked a non-CORS element");
+    const again = await env.send({ type: "SS_CONTENT_APPLY", settings: boost, corsUnlock: true });
+    assert(again.value && !again.value.corsUnlockNeeded, "retries unlock forever");
+  });
+
+  await test("cors: probe ok but player reload fails reverts to original playback", async () => {
     const el = bandcamp();
     const env = makeContentEnv({ firefox: true, origin: "https://artist.bandcamp.com", elements: [el] });
     await env.send({ type: "SS_CONTENT_APPLY", settings: boost, corsUnlock: true });
     const p = env.send({ type: "SS_CONTENT_CORS_RELOAD", corsUnlock: true });
+    await tick(5);
+    env.probes[0]._fire("loadedmetadata");
     await tick(5);
     el._fire("error");
     await tick(5);
