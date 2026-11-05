@@ -34,8 +34,14 @@
 
   const tracked = [];               // elements the page played (newest last)
   const sources = new WeakMap();    // element -> MediaElementAudioSourceNode
-  const originalVolume = new WeakMap();
+  const pageVolume = new WeakMap(); // element -> volume the page asked for
   const mutedByUs = new WeakSet();
+  let basicLevel = 1;               // SoundSphere's 0..1 level in basic mode
+
+  // Native volume accessor, captured before the page can touch it.
+  const volumeDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
+  const nativeGetVolume = el => volumeDescriptor.get.call(el);
+  const nativeSetVolume = (el, value) => volumeDescriptor.set.call(el, value);
   let bus = null;
   let settings = null;              // null until SoundSphere is used on the tab
 
@@ -205,11 +211,15 @@
     }
   }
 
-  // --- element volume (basic mode), relative to the player's own volume ----
+  // --- element volume (basic mode), on top of the player's own volume ------
+  // Players such as Spotify re-apply their own volume to the element, which
+  // undid a one-off write. While SoundSphere manages an element, the volume
+  // accessor (below) stores what the page asks for and outputs
+  // pageVolume x basicLevel; the page still reads back its own value.
   function restoreElement(el) {
-    if (originalVolume.has(el)) {
-      try { el.volume = originalVolume.get(el); } catch {}
-      originalVolume.delete(el);
+    if (pageVolume.has(el)) {
+      try { nativeSetVolume(el, pageVolume.get(el)); } catch {}
+      pageVolume.delete(el);
     }
     if (mutedByUs.has(el)) {
       try { el.muted = false; } catch {}
@@ -219,8 +229,8 @@
 
   function applyBasic(el, s) {
     try {
-      if (!originalVolume.has(el)) originalVolume.set(el, el.volume);
-      el.volume = clamp(originalVolume.get(el) * Math.min(1, s.volume / 100), 0, 1);
+      if (!pageVolume.has(el)) pageVolume.set(el, nativeGetVolume(el));
+      nativeSetVolume(el, clamp(pageVolume.get(el) * basicLevel, 0, 1));
       if (s.muted || s.volume <= 0) {
         if (!el.muted) {
           el.muted = true;
@@ -240,6 +250,7 @@
   function applyAll() {
     if (!settings) return;
     const s = settings;
+    basicLevel = Math.min(1, s.volume / 100);
     let hooked = 0;
     for (const el of hiddenMedia()) {
       // Only reroute when the settings need WebAudio; volume cuts and mute
@@ -282,6 +293,33 @@
     }
     if (settings && isHidden(el)) applyAll();
     else if (isHidden(el)) report();
+  }
+
+  // --- volume accessor: only elements SoundSphere manages are affected -----
+  if (volumeDescriptor && volumeDescriptor.get && volumeDescriptor.set) {
+    try {
+      Object.defineProperty(HTMLMediaElement.prototype, "volume", {
+        configurable: true,
+        enumerable: volumeDescriptor.enumerable,
+        get() {
+          return pageVolume.has(this) ? pageVolume.get(this) : nativeGetVolume(this);
+        },
+        set(value) {
+          if (!pageVolume.has(this)) {
+            nativeSetVolume(this, value);
+            return;
+          }
+          const number = Number(value);
+          // Out-of-range values throw exactly as the native setter does.
+          if (!(number >= 0 && number <= 1)) {
+            nativeSetVolume(this, value);
+            return;
+          }
+          pageVolume.set(this, number);
+          nativeSetVolume(this, clamp(number * basicLevel, 0, 1));
+        }
+      });
+    } catch {}
   }
 
   // --- play() hook: plain same-world wrapper, behaviour unchanged ----------

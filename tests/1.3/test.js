@@ -288,6 +288,16 @@ function makeMainWorldEnv(opts = {}) {
   class HTMLMediaElement {}
   const nativePlay = function play() { this.paused = false; return "native-play"; };
   HTMLMediaElement.prototype.play = nativePlay;
+  // Browser-like accessor: actual output level lives in _out.
+  Object.defineProperty(HTMLMediaElement.prototype, "volume", {
+    configurable: true, enumerable: true,
+    get() { return this._out ?? 1; },
+    set(v) {
+      const n = Number(v);
+      if (!(n >= 0 && n <= 1)) throw new RangeError("IndexSizeError");
+      this._out = n;
+    }
+  });
   const document = { baseURI: origin + "/" };
   const win = {
     AudioContext: world.AudioContext, HTMLMediaElement, document,
@@ -303,10 +313,13 @@ function makeMainWorldEnv(opts = {}) {
   loadScript(path.join(DIR, "inject/media_main.js"), sandbox);
   const inner = vm.runInContext("window", sandbox);
   const env = { world, out, HTMLMediaElement, nativePlay, sandbox };
-  env.el = (props = {}) => Object.assign(new HTMLMediaElement(), {
-    volume: 1, muted: false, paused: true, currentSrc: "", src: "", crossOrigin: null, srcObject: null, mediaKeys: null,
-    tagName: "AUDIO", isConnected: false, getRootNode() { return this.isConnected ? document : this; }
-  }, props);
+  env.el = (props = {}) => {
+    const { volume = 1, ...rest } = props;
+    return Object.assign(new HTMLMediaElement(), {
+      _out: volume, muted: false, paused: true, currentSrc: "", src: "", crossOrigin: null, srcObject: null, mediaKeys: null,
+      tagName: "AUDIO", isConnected: false, getRootNode() { return this.isConnected ? document : this; }
+    }, rest);
+  };
   env.play = el => HTMLMediaElement.prototype.play.call(el);
   env.settings = settings => listeners.forEach(fn => fn({ source: inner, data: { source: "SoundSphere", type: "SS_MAIN_SETTINGS", payload: settings } }));
   env.lastStatus = () => [...out].reverse().find(m => m.type === "SS_MAIN_STATUS");
@@ -760,14 +773,14 @@ function findNode(world, kind) {
     const visible = env.el({ isConnected: true, currentSrc: "blob:https://soundcloud.com/x", volume: 0.5 });
     assert(env.play(visible) === "native-play" && visible.paused === false, "native play behaviour changed");
     env.settings({ ...boost, volume: 300 });
-    assert(visible.volume === 0.5 && env.world.mediaSources.length === 0, "visible element touched");
+    assert(visible._out === 0.5 && env.world.mediaSources.length === 0, "visible element touched");
   });
 
   await test("main: nothing touched before SoundSphere is used", async () => {
     const env = makeMainWorldEnv();
     const el = env.el({ currentSrc: "blob:https://soundcloud.com/x", volume: 0.7 });
     env.play(el);
-    assert(el.volume === 0.7 && env.world.contexts.length === 0, "acted without settings");
+    assert(el._out === 0.7 && env.world.contexts.length === 0, "acted without settings");
   });
 
   await test("main: Spotify-style hidden DRM player gets volume + mute, never rerouted", async () => {
@@ -775,9 +788,10 @@ function findNode(world, kind) {
     const el = env.el({ tagName: "VIDEO", currentSrc: "blob:https://open.spotify.com/x", mediaKeys: {}, volume: 0.8 });
     env.play(el);
     env.settings({ ...boost, volume: 50 });
-    assert(Math.abs(el.volume - 0.4) < 1e-9, "volume " + el.volume);
+    assert(Math.abs(el._out - 0.4) < 1e-9, "output " + el._out);
+    assert(Math.abs(el.volume - 0.8) < 1e-9, "page reads " + el.volume + " instead of its own 0.8");
     env.settings({ ...boost, volume: 400 });
-    assert(Math.abs(el.volume - 0.8) < 1e-9, "DRM player boosted above its own volume: " + el.volume);
+    assert(Math.abs(el._out - 0.8) < 1e-9, "DRM player boosted above its own volume: " + el._out);
     assert(env.world.mediaSources.length === 0, "DRM player rerouted (would be silent)");
     env.settings({ ...boost, volume: 0, muted: true });
     assert(el.muted === true, "mute failed");
@@ -785,15 +799,39 @@ function findNode(world, kind) {
     assert(st && st.payload.drm === true && st.payload.media === 1, JSON.stringify(st));
   });
 
+  await test("main: player re-applying its own volume keeps SoundSphere's level (Spotify)", async () => {
+    const env = makeMainWorldEnv({ origin: "https://open.spotify.com" });
+    const el = env.el({ tagName: "VIDEO", currentSrc: "blob:https://open.spotify.com/x", mediaKeys: {}, volume: 0.8 });
+    env.play(el);
+    env.settings({ ...boost, volume: 50 });
+    el.volume = 0.8; // Spotify re-asserts its stored volume
+    assert(Math.abs(el._out - 0.4) < 1e-9, "page write undid SoundSphere: output " + el._out);
+    el.volume = 0.6; // user moves Spotify's own slider
+    assert(Math.abs(el._out - 0.3) < 1e-9 && Math.abs(el.volume - 0.6) < 1e-9, "own slider not combined: " + el._out);
+    let threw = false;
+    try { el.volume = 2; } catch (e) { threw = e instanceof RangeError || e.name === "RangeError"; }
+    assert(threw, "out-of-range volume no longer throws like native");
+    env.settings({ ...boost, volume: 100 });
+    assert(Math.abs(el._out - 0.6) < 1e-9, "100% does not give back the page's volume: " + el._out);
+  });
+
+  await test("main: unmanaged players use the native volume path", async () => {
+    const env = makeMainWorldEnv();
+    const el = env.el({ isConnected: true, volume: 0.5 });
+    env.settings({ ...boost, volume: 30 });
+    el.volume = 0.9;
+    assert(el._out === 0.9 && el.volume === 0.9, "visible player's volume altered");
+  });
+
   await test("main: SoundCloud-style hidden readable player boosts via WebAudio", async () => {
     const env = makeMainWorldEnv();
     const el = env.el({ currentSrc: "blob:https://soundcloud.com/hls", volume: 0.6 });
     env.play(el);
     env.settings({ ...boost, volume: 80 });
-    assert(env.world.mediaSources.length === 0 && Math.abs(el.volume - 0.48) < 1e-9, "volume cut should stay on the element");
+    assert(env.world.mediaSources.length === 0 && Math.abs(el._out - 0.48) < 1e-9, "volume cut should stay on the element");
     env.settings({ ...boost, volume: 250 });
     assert(env.world.mediaSources.length === 1, "not rerouted for boost");
-    assert(Math.abs(el.volume - 0.6) < 1e-9, "player volume not restored after hook: " + el.volume);
+    assert(Math.abs(el._out - 0.6) < 1e-9, "player volume not restored after hook: " + el._out);
     const gain = env.world.contexts[0] && [...env.world.mediaSources[0].outputs][0];
     assert(gain && [...gain.outputs][0].gain.value === 2.5, "bus gain not 2.5");
     assert(env.lastStatus().payload.hooked === 1, "status not reporting hook");

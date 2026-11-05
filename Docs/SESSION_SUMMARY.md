@@ -54,3 +54,10 @@
 - Expected: Spotify 0-100% + mute (DRM); SoundCloud boost/EQ if its player uses blob:/CORS audio.
 - Unverified in real Firefox. If Spotify/SoundCloud pages misbehave, remove the MAIN entry from manifest.firefox.json.
 - Evidence if still no effect: page console line `[SoundSphere] hidden player found: ... | drm: ... | readable: ...`.
+
+## 1.3.6 (2026-11-05)
+
+- Chrome 1.3.4: everything works. Firefox 1.3.5: only Spotify left; mute works, volume does not.
+- Cause (reproduced in harness): Spotify re-writes its own `volume`, undoing SoundSphere's one-off write.
+- Fix: `HTMLMediaElement.prototype.volume` accessor in media_main.js (Spotify/SoundCloud only) combines page volume with SoundSphere level for managed elements; native behaviour for all others.
+- Spotify ceiling stays 100% (Widevine DRM).

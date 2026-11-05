@@ -42,3 +42,5 @@
 - 1.3.4 verified by owner (Firefox): YouTube + Bandcamp fully functional (CORS unlock works); Spotify + SoundCloud no effect.
 - 1.3.5: MAIN-world `inject/media_main.js` (Spotify/SoundCloud only) controls hidden players; content status merges them.
 - 1.3.5: harness 41/41 (1.3.4: 34/41); `web-ext lint` 0/0/0.
+- Owner: Chrome 1.3.4 all sites OK. Firefox 1.3.5: SoundCloud OK; Spotify only mute + 100% work.
+- 1.3.6: page script intercepts `volume` on managed hidden players (output = page volume x SoundSphere level). Harness 43/43; lint 0/0/0.
