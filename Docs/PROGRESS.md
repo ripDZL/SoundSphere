@@ -37,3 +37,5 @@
 - 1.3.3: CORS probe on a detached element before touching the player (site never sees a failed CORS load / error event).
 - 1.3.3: Spotify `createElement` hook (detached player); `[SoundSphere]` diagnostics in page + background consoles.
 - 1.3.3: harness 35/35; `web-ext lint` 0/0/0.
+- 1.3.4: 1.3.3 broke page loading in Firefox; removed all page-prototype hooks (play/createElement) and off-DOM tracking.
+- 1.3.4: guard test: content script must leave page prototypes untouched (fails on 1.3.3). Harness 34/34; lint 0/0/0.

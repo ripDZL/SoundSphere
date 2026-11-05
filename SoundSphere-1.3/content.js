@@ -438,106 +438,12 @@ class AudioBus {
   }
 }
 
-// --- Media outside the light DOM --------------------------------------------
-// Some players never attach their element to the document (Spotify Web) or
-// keep it inside a shadow root, so querySelectorAll cannot see it. In Firefox
-// a content script can wrap the page's HTMLMediaElement.prototype.play
-// (exportFunction) and learn about every element the page plays. Elsewhere
-// this is a no-op and only DOM media is managed.
-
-const OFF_DOM_LIMIT = 64;
-const trackedMedia = [];          // WeakRef (or element) list, newest last
-const trackedSet = new WeakSet();
-let onTrackedPlay = null;         // set once the controller exists
-
-function makeRef(el) {
-  return typeof WeakRef === "function" ? new WeakRef(el) : { deref: () => el };
-}
-
-function trackMedia(el) {
-  if (!isMediaElement(el)) return;
-  if (!trackedSet.has(el)) {
-    trackedSet.add(el);
-    trackedMedia.push(makeRef(el));
-    if (!el.isConnected) ssLog("tracking off-DOM", String(el.tagName).toLowerCase(), "element");
-    if (trackedMedia.length > OFF_DOM_LIMIT) trackedMedia.shift();
-    // Off-DOM "encrypted" events never reach the document listener.
-    try { el.addEventListener("encrypted", () => markDrm("encrypted"), { once: true }); } catch {}
-  }
-  if (onTrackedPlay) onTrackedPlay(el);
-}
-
-// Page objects handed to us through the bridge are normalized to the content
-// script's (Xray) view so identity matches querySelectorAll results.
-function toContentView(obj) {
-  try {
-    return typeof XPCNativeWrapper === "function" ? XPCNativeWrapper(obj) : obj;
-  } catch {
-    return obj;
-  }
-}
-
-(function installMediaHooks() {
-  if (typeof exportFunction !== "function") return;
-  let page = null;
-  try {
-    page = window.wrappedJSObject;
-  } catch {
-    return;
-  }
-  const installed = { play: false, createElement: false };
-
-  // Every element the page plays, attached or not.
-  const mediaProto = page && page.HTMLMediaElement && page.HTMLMediaElement.prototype;
-  if (mediaProto && typeof mediaProto.play === "function") {
-    const nativePlay = mediaProto.play;
-    try {
-      exportFunction(function play(...args) {
-        try { trackMedia(toContentView(this)); } catch {}
-        return nativePlay.apply(this, args);
-      }, mediaProto, { defineAs: "play" });
-      installed.play = true;
-    } catch {}
-  }
-
-  // Spotify Web creates its <video>/<audio> with document.createElement and
-  // never attaches it; catch it at creation. Limited to Spotify because
-  // createElement is a hot path on every other site.
-  const docProto = page && page.Document && page.Document.prototype;
-  if (window.location.hostname === "open.spotify.com" && docProto && typeof docProto.createElement === "function") {
-    const nativeCreate = docProto.createElement;
-    try {
-      exportFunction(function createElement(...args) {
-        const el = nativeCreate.apply(this, args);
-        try {
-          if (/^(audio|video)$/i.test(String(args[0]))) trackMedia(toContentView(el));
-        } catch {}
-        return el;
-      }, docProto, { defineAs: "createElement" });
-      installed.createElement = true;
-    } catch {}
-  }
-
-  if (installed.createElement) ssLog("media hooks installed:", JSON.stringify(installed));
-})();
-
 function mediaElements() {
-  let list = [];
   try {
-    list = Array.from(document.querySelectorAll("audio,video"));
-  } catch {}
-
-  if (trackedMedia.length) {
-    const seen = new Set(list);
-    for (const ref of trackedMedia) {
-      const el = ref.deref();
-      if (el && !seen.has(el)) {
-        seen.add(el);
-        list.push(el);
-      }
-    }
+    return Array.from(document.querySelectorAll("audio,video"));
+  } catch {
+    return [];
   }
-  return list;
 }
 
 class MediaHook {
@@ -810,7 +716,6 @@ class SoundSphereContentController {
 }
 
 const controller = new SoundSphereContentController();
-onTrackedPlay = el => controller.onPlay(el);
 
 // The background broadcasts to every frame of the tab and keeps the first
 // answer. Frames with media answer at once; the top frame answers last as a

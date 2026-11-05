@@ -37,3 +37,12 @@
 - Fix: probe first; real player only reloaded after probe loads metadata in CORS mode.
 - Spotify: player created via `document.createElement`, kept detached (per spotitySpeedExtension, KDE D13878); now hooked at creation.
 - Evidence needed if still failing: page console `[SoundSphere]` lines on Bandcamp/Spotify + background console (about:debugging > Inspect).
+
+## 1.3.4 (2026-11-05)
+
+- 1.3.3 report: plugin broken, websites did not load (Firefox).
+- Only page-load-time change vs 1.3.1 was `installMediaHooks` (exportFunction wrappers on page prototypes); removed.
+- Lost: Spotify detached-player support (back to no control on Spotify in Firefox).
+- Kept: Bandcamp CORS probe + unlock (runs only after boost/EQ on cross-origin media).
+- Failed approach: patching page `play()`/`createElement` from content script in Firefox. Do not retry without real-browser testing.
+- Next step: real-Firefox verification (logs or live session) before any further Spotify work.

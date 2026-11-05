@@ -244,9 +244,12 @@ function makeContentEnv(opts = {}) {
   win.top = opts.subframe ? {} : win;
   // Page-side HTMLMediaElement prototype; elements "play" through it.
   const pageProto = { play() { this.paused = false; return "native-play"; } };
+  const nativePagePlay = pageProto.play;
+  let nativePageCreate = null;
   const extras = {};
   if (opts.firefox) {
     const pageDocProto = { createElement: tag => makeElement(String(tag).toUpperCase(), { isConnected: false }) };
+    nativePageCreate = pageDocProto.createElement;
     extras.wrappedJSObject = { HTMLMediaElement: { prototype: pageProto }, Document: { prototype: pageDocProto } };
     extras.exportFunction = (fn, target, o) => { target[o.defineAs] = fn; return fn; };
   }
@@ -258,7 +261,7 @@ function makeContentEnv(opts = {}) {
     setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, Map, Set, WeakMap, WeakSet, WeakRef, Symbol, Error, String, Boolean, Date, JSON
   });
   loadScript(path.join(DIR, "content.js"), sandbox);
-  const env = { world, elements, injected, docListeners, sandbox, pageProto, probes };
+  const env = { world, elements, injected, docListeners, sandbox, pageProto, probes, nativePagePlay, nativePageCreate };
   // Page code calling el.play() goes through the (possibly patched) prototype.
   env.pagePlay = el => pageProto.play.call(el);
   env.send = message => new Promise(resolve => {
@@ -593,29 +596,19 @@ function findNode(world, kind) {
   });
 
   // ---------------- Firefox: off-DOM media (Spotify-style)
-  await test("firefox: detached DRM player gets volume + mute (no reroute)", async () => {
-    const env = makeContentEnv({ firefox: true, origin: "https://open.spotify.com", elements: [] });
-    const el = makeElement("VIDEO", { currentSrc: "blob:https://open.spotify.com/x", isConnected: false, mediaKeys: {}, volume: 0.8 });
-    env.pagePlay(el); // page plays an element never attached to the DOM
-    let r = await env.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 50 } });
-    assert(r.responded && r.value.backend === "protected-basic", "status=" + JSON.stringify(r.value));
-    assert(Math.abs(el.volume - 0.4) < 1e-9, "detached volume " + el.volume);
-    assert(env.world.mediaSources.length === 0, "DRM element rerouted");
-    await env.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 0, muted: true } });
-    assert(el.muted === true, "mute did not reach detached element");
+  // 1.3.3 wrapped page prototypes (play/createElement) via exportFunction and
+  // pages stopped loading in Firefox. Page-load-time code must not patch the page.
+  await test("firefox: content script leaves page prototypes untouched", async () => {
+    for (const origin of ["https://www.youtube.com", "https://open.spotify.com", "https://artist.bandcamp.com"]) {
+      const env = makeContentEnv({ firefox: true, origin, elements: [] });
+      const page = env.sandbox.wrappedJSObject;
+      await env.send({ type: "SS_CONTENT_APPLY", settings: boost, corsUnlock: true });
+      assert(env.pageProto.play === env.nativePagePlay, origin + ": HTMLMediaElement.prototype.play replaced");
+      assert(page.Document.prototype.createElement === env.nativePageCreate, origin + ": Document.prototype.createElement replaced");
+    }
   });
 
-  await test("firefox: Spotify element caught at createElement (before any play)", async () => {
-    const env = makeContentEnv({ firefox: true, origin: "https://open.spotify.com", elements: [] });
-    const created = [];
-    const pageDocProto = env.sandbox.wrappedJSObject.Document.prototype;
-    const el = pageDocProto.createElement.call({}, "video");
-    el.mediaKeys = {}; el.volume = 1;
-    const r = await env.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 30 } });
-    assert(Math.abs(el.volume - 0.3) < 1e-9, "created element not controlled, volume=" + el.volume + " status=" + JSON.stringify(r.value));
-  });
-
-  await test("firefox: play hook keeps page behaviour (calls native, returns its value)", async () => {
+  await test("firefox: page play() behaves natively", async () => {
     const env = makeContentEnv({ firefox: true, elements: [] });
     const el = makeElement("AUDIO", { isConnected: false, paused: true });
     const ret = env.pagePlay(el);
