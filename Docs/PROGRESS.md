@@ -44,3 +44,5 @@
 - 1.3.5: harness 41/41 (1.3.4: 34/41); `web-ext lint` 0/0/0.
 - Owner: Chrome 1.3.4 all sites OK. Firefox 1.3.5: SoundCloud OK; Spotify only mute + 100% work.
 - 1.3.6: page script intercepts `volume` on managed hidden players (output = page volume x SoundSphere level). Harness 43/43; lint 0/0/0.
+- Owner Firefox 1.3.6: Spotify unchanged (mute + 100% only). Console: hidden `video` found, drm true, 0 DOM media, no player iframe; Spotify code reads `mozAudioCaptured`.
+- 1.3.7: read-only diagnostics in media_main.js (capture/WebAudio counters, `__soundSphereDebug()` report). Harness 44/44; lint 0/0/0.

@@ -61,3 +61,10 @@
 - Cause (reproduced in harness): Spotify re-writes its own `volume`, undoing SoundSphere's one-off write.
 - Fix: `HTMLMediaElement.prototype.volume` accessor in media_main.js (Spotify/SoundCloud only) combines page volume with SoundSphere level for managed elements; native behaviour for all others.
 - Spotify ceiling stays 100% (Widevine DRM).
+
+## 1.3.7 (2026-11-05)
+
+- Evidence (owner console): Spotify player = hidden `<video>`, DRM, found by media_main.js; mute works, element volume has no audible effect.
+- Hypothesis: Spotify captures player audio (mozCaptureStream) and plays it through WebAudio, so element volume is bypassed; Spotify volume = a GainNode.
+- 1.3.7 adds passive counters (captureStream calls, MediaStream/MediaElement sources, destination connections) + `__soundSphereDebug()`.
+- Next: owner runs `__soundSphereDebug()` on Spotify after moving slider; if stream source -> destination path confirmed, control Spotify's WebAudio output (possible boost).

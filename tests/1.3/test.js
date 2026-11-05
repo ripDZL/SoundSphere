@@ -299,8 +299,9 @@ function makeMainWorldEnv(opts = {}) {
     }
   });
   const document = { baseURI: origin + "/" };
+  HTMLMediaElement.prototype.mozCaptureStream = function () { return { getAudioTracks: () => [{}] }; };
   const win = {
-    AudioContext: world.AudioContext, HTMLMediaElement, document,
+    AudioContext: world.AudioContext, AudioNode: world.AudioNode, HTMLMediaElement, document,
     location: { origin, hostname: new URL(origin).hostname },
     addEventListener(t, fn) { if (t === "message") listeners.push(fn); },
     postMessage(data) { out.push(data); }
@@ -774,6 +775,24 @@ function findNode(world, kind) {
     assert(env.play(visible) === "native-play" && visible.paused === false, "native play behaviour changed");
     env.settings({ ...boost, volume: 300 });
     assert(visible._out === 0.5 && env.world.mediaSources.length === 0, "visible element touched");
+  });
+
+  await test("main: diagnostics are passive and report the audio path", async () => {
+    const env = makeMainWorldEnv({ origin: "https://open.spotify.com" });
+    const el = env.el({ tagName: "VIDEO", currentSrc: "blob:https://open.spotify.com/x", mediaKeys: { keySystem: "com.widevine.alpha" }, volume: 0.8 });
+    env.play(el);
+    const stream = el.mozCaptureStream();                 // page captures player audio
+    assert(stream && stream.getAudioTracks().length === 1, "captureStream result changed");
+    const ctx = new env.world.AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    const gain = ctx.createGain();
+    assert(src.connect(gain) === gain, "connect return value changed");
+    gain.connect(ctx.destination);
+    env.settings({ ...boost, volume: 50 });
+    const report = JSON.parse(vm.runInContext("__soundSphereDebug()", env.sandbox));
+    assert(report.players.length === 1 && report.players[0].drm && report.players[0].keySystem === "com.widevine.alpha", JSON.stringify(report.players));
+    assert(report.audioGraph.captureStreamCalls === 1 && report.audioGraph.streamSources.length === 1, JSON.stringify(report.audioGraph));
+    assert(report.audioGraph.destConnections.length === 1, "destination connection not recorded");
   });
 
   await test("main: nothing touched before SoundSphere is used", async () => {

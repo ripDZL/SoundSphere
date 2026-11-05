@@ -1,14 +1,14 @@
 # AI Context
 
 - Project: SoundSphere browser extension.
-- Current milestone: SoundSphere 1.3.6 (Firefox Spotify volume via managed volume accessor).
+- Current milestone: SoundSphere 1.3.7 (Spotify Firefox diagnostics: `__soundSphereDebug()` in page console).
 - New package path: `SoundSphere-1.3/`.
 - Chrome target: MV3, Chrome 116+, `tabCapture` + offscreen WebAudio.
 - Firefox target: MV3 package manifest with content-script media processing fallback, Firefox 140+ for AMO data-consent support.
 - Legacy release folders remain untouched.
 - Research notes: `Docs/RESEARCH_AUDIO_EXTENSIONS.md`.
 - Package: `tools/package-1.3.sh [outdir]` -> `SoundSphere-<ver>-chrome.zip` + `SoundSphere-<ver>-firefox.xpi`; CI writes to `beta/`.
-- Tests: `node tests/1.3/test.js` (vm harness, 43 checks); CI runs it before packaging.
+- Tests: `node tests/1.3/test.js` (vm harness, 44 checks); CI runs it before packaging.
 - Rule: own code only; reference add-ons (e.g. GPL '600% Sound Booster (Fixed)') are not copied — repo is MIT.
 - Debug: `DEBUG_LOG` in content.js prints `[SoundSphere]` lines (CORS/off-DOM/backend changes); turn off before store submission.
 - Limit: Widevine/DRM media (Spotify Web) cannot be routed through WebAudio in Firefox; 0-100% + mute only.
