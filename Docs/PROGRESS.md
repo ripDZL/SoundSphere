@@ -39,3 +39,6 @@
 - 1.3.3: harness 35/35; `web-ext lint` 0/0/0.
 - 1.3.4: 1.3.3 broke page loading in Firefox; removed all page-prototype hooks (play/createElement) and off-DOM tracking.
 - 1.3.4: guard test: content script must leave page prototypes untouched (fails on 1.3.3). Harness 34/34; lint 0/0/0.
+- 1.3.4 verified by owner (Firefox): YouTube + Bandcamp fully functional (CORS unlock works); Spotify + SoundCloud no effect.
+- 1.3.5: MAIN-world `inject/media_main.js` (Spotify/SoundCloud only) controls hidden players; content status merges them.
+- 1.3.5: harness 41/41 (1.3.4: 34/41); `web-ext lint` 0/0/0.

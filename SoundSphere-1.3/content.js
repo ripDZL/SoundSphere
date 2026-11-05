@@ -291,6 +291,62 @@ function pingTap() {
   } catch {}
 }
 
+// --- Hidden-player bridge (Firefox MAIN-world script on Spotify/SoundCloud) --
+// inject/media_main.js controls players this script cannot see (detached or in
+// shadow DOM) and reports them here. Only registered on these hosts.
+const IS_MAIN_HOST = /(^|\.)soundcloud\.com$|^open\.spotify\.com$/i.test(window.location.hostname || "");
+const MAIN_REPLY_WAIT_MS = 150;
+
+const mainState = { present: false, media: 0, hooked: 0, readable: 0, drm: false };
+let mainWaiters = [];
+
+function postMainSettings(settings) {
+  if (!IS_MAIN_HOST) return;
+  try {
+    window.postMessage({
+      source: "SoundSphere",
+      type: "SS_MAIN_SETTINGS",
+      payload: {
+        volume: settings.volume,
+        muted: settings.muted,
+        mode: settings.mode,
+        eqGains: settings.eqGains.slice()
+      }
+    }, "*");
+  } catch {}
+}
+
+// Resolves on the page script's next status report (or after timeoutMs).
+function waitForMainStatus(timeoutMs) {
+  if (!IS_MAIN_HOST) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const waiter = ok => {
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => {
+      mainWaiters = mainWaiters.filter(w => w !== waiter);
+      resolve(false);
+    }, timeoutMs);
+    mainWaiters.push(waiter);
+  });
+}
+
+window.addEventListener("message", event => {
+  if (!event || event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== "SoundSphereMain" || data.type !== "SS_MAIN_STATUS") return;
+  const p = data.payload || {};
+  mainState.present = true;
+  mainState.media = clamp(p.media, 0, 64);
+  mainState.hooked = clamp(p.hooked, 0, 64);
+  mainState.readable = clamp(p.readable, 0, 64);
+  mainState.drm = !!p.drm;
+  const waiters = mainWaiters;
+  mainWaiters = [];
+  waiters.forEach(w => w(true));
+});
+
 window.addEventListener("message", event => {
   if (!event || event.source !== window) return;
   const data = event.data;
@@ -567,7 +623,7 @@ class SoundSphereContentController {
   }
 
   hasMedia() {
-    return mediaElements().length > 0 || this.hook.hookedCount > 0;
+    return mediaElements().length > 0 || this.hook.hookedCount > 0 || mainState.media > 0;
   }
 
   onPlay(el) {
@@ -633,7 +689,11 @@ class SoundSphereContentController {
     if (!drmState.inUse && this.hook.hasCandidates() && !this.bus.isRunning()) {
       if (await this.bus.waitForRunning(CONTEXT_START_WAIT_MS)) this.hook.hookAll();
     }
-    return this.applyNow();
+    const result = this.applyNow();
+    if (!IS_MAIN_HOST) return result;
+    // Let the page-world script apply and report its hidden players.
+    await waitForMainStatus(MAIN_REPLY_WAIT_MS);
+    return this.buildResult();
   }
 
   applyNow() {
@@ -648,6 +708,7 @@ class SoundSphereContentController {
 
     if (this.hook.hookedCount > 0) this.bus.apply(settings);
     postTapSettings(settings);
+    postMainSettings(this.settings); // page script clamps DRM players itself
     this.syncElements(settings);
 
     const previousBackend = this.backend;
@@ -661,6 +722,10 @@ class SoundSphereContentController {
         "| drm:", drmState.inUse, "| context:", this.bus.ctx ? this.bus.ctx.state : "none");
     }
 
+    return this.buildResult();
+  }
+
+  buildResult() {
     const result = this.status();
     // Ask the background to unlock cross-origin media only when the user
     // wants more than the element alone can give (boost / EQ / mode).
@@ -674,45 +739,57 @@ class SoundSphereContentController {
     this.settings = normalizeSettings({});
     if (this.hook.hookedCount > 0) this.bus.apply(this.settings);
     postTapSettings(this.settings);
+    postMainSettings(this.settings);
     for (const el of mediaElements()) this.restoreElement(el);
     this.backend = "basic";
   }
 
   status() {
+    // Hidden players controlled by the page-world script (Spotify/SoundCloud).
+    const mainBoostable = mainState.hooked > 0 || mainState.readable > 0;
+    const mainProtected = mainState.drm && !mainBoostable;
+
     // Before the first apply nothing is hooked yet, so report what *can* be
     // boosted (CORS-readable media present) rather than what already is.
-    const canBoost = !drmState.inUse && (
+    const canBoost = mainBoostable || (!drmState.inUse && (
       this.hook.hookedCount > 0 ||
       tapState.contexts > 0 ||
       this.hook.hasCandidates() ||
       this.corsReloads.size > 0 ||
       this.corsCandidates().length > 0
-    );
+    ));
+
+    let backend = this.backend;
+    if (backend === "basic" && mainState.hooked > 0) backend = "media-element";
+    else if (backend === "basic" && mainProtected) backend = "protected-basic";
 
     let reason = "";
-    if (drmState.inUse) {
+    if (drmState.inUse || (mainProtected && !canBoost)) {
       reason = "Protected playback detected. Basic 0-100 volume only.";
     } else if (!canBoost) {
       reason = this.hasMedia()
         ? "This player's audio can't be processed here. Basic 0-100 volume only."
         : "No media found yet. Basic 0-100 volume only.";
-    } else if (this.active && this.hook.hookedCount === 0 && tapState.contexts === 0 && !this.bus.isRunning()) {
+    } else if (this.active && this.hook.hookedCount === 0 && this.hook.hasCandidates() &&
+      !this.bus.isRunning()) {
       reason = "Click the page once to enable boost and EQ.";
     }
 
     return {
       ok: true,
-      backend: this.backend,
+      backend,
       canBoost,
       engaged: this.active,
-      hooked: this.hook.hookedCount,
+      hooked: this.hook.hookedCount + mainState.hooked,
       contextState: this.bus.ctx ? this.bus.ctx.state : "none",
       tapReady: tapState.ready,
       tapContexts: tapState.contexts,
-      drm: { ...drmState },
+      hiddenPlayers: mainState.media,
+      drm: { ...drmState, hiddenPlayer: mainState.drm },
       reason
     };
   }
+
 }
 
 const controller = new SoundSphereContentController();

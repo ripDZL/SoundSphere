@@ -46,3 +46,11 @@
 - Kept: Bandcamp CORS probe + unlock (runs only after boost/EQ on cross-origin media).
 - Failed approach: patching page `play()`/`createElement` from content script in Firefox. Do not retry without real-browser testing.
 - Next step: real-Firefox verification (logs or live session) before any further Spotify work.
+
+## 1.3.5 (2026-11-05)
+
+- 1.3.4 confirmed: YouTube + Bandcamp work in Firefox; Spotify + SoundCloud no effect (players not in DOM).
+- Approach: Firefox 128+ `world: "MAIN"` content script (no exportFunction bridge), limited to the two sites.
+- Expected: Spotify 0-100% + mute (DRM); SoundCloud boost/EQ if its player uses blob:/CORS audio.
+- Unverified in real Firefox. If Spotify/SoundCloud pages misbehave, remove the MAIN entry from manifest.firefox.json.
+- Evidence if still no effect: page console line `[SoundSphere] hidden player found: ... | drm: ... | readable: ...`.

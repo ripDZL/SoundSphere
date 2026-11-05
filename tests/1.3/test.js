@@ -238,8 +238,9 @@ function makeContentEnv(opts = {}) {
     location: { origin, href: origin + "/page", hostname: new URL(origin).hostname },
     addEventListener(t, fn) { (winListeners[t] = winListeners[t] || []).push(fn); },
     removeEventListener() {},
-    postMessage() {}
+    postMessage(data) { posted.push(data); }
   };
+  const posted = [];
   win.window = win;
   win.top = opts.subframe ? {} : win;
   // Page-side HTMLMediaElement prototype; elements "play" through it.
@@ -261,7 +262,7 @@ function makeContentEnv(opts = {}) {
     setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, Map, Set, WeakMap, WeakSet, WeakRef, Symbol, Error, String, Boolean, Date, JSON
   });
   loadScript(path.join(DIR, "content.js"), sandbox);
-  const env = { world, elements, injected, docListeners, sandbox, pageProto, probes, nativePagePlay, nativePageCreate };
+  const env = { world, elements, injected, docListeners, sandbox, pageProto, probes, nativePagePlay, nativePageCreate, posted };
   // Page code calling el.play() goes through the (possibly patched) prototype.
   env.pagePlay = el => pageProto.play.call(el);
   env.send = message => new Promise(resolve => {
@@ -275,6 +276,40 @@ function makeContentEnv(opts = {}) {
   env.firePlay = el => (docListeners.play || []).forEach(fn => fn({ type: "play", target: el }));
   const innerWindow = vm.runInContext("window", sandbox); // vm global proxy, not `win`
   env.postFromPage = data => (winListeners.message || []).forEach(fn => fn({ source: innerWindow, data }));
+  return env;
+}
+
+// ---------------------------------------------------------------- Page MAIN-world env (inject/media_main.js)
+function makeMainWorldEnv(opts = {}) {
+  const world = makeAudioWorld({ initialState: opts.initialState });
+  const origin = opts.origin || "https://soundcloud.com";
+  const listeners = [];
+  const out = [];
+  class HTMLMediaElement {}
+  const nativePlay = function play() { this.paused = false; return "native-play"; };
+  HTMLMediaElement.prototype.play = nativePlay;
+  const document = { baseURI: origin + "/" };
+  const win = {
+    AudioContext: world.AudioContext, HTMLMediaElement, document,
+    location: { origin, hostname: new URL(origin).hostname },
+    addEventListener(t, fn) { if (t === "message") listeners.push(fn); },
+    postMessage(data) { out.push(data); }
+  };
+  win.window = win;
+  const sandbox = Object.assign(win, {
+    console: Object.assign(Object.create(console), { info() {} }),
+    URL, setTimeout, clearTimeout, Promise, Float32Array, Math, Number, Array, Object, WeakMap, WeakSet, Map, Set, String, Boolean, JSON
+  });
+  loadScript(path.join(DIR, "inject/media_main.js"), sandbox);
+  const inner = vm.runInContext("window", sandbox);
+  const env = { world, out, HTMLMediaElement, nativePlay, sandbox };
+  env.el = (props = {}) => Object.assign(new HTMLMediaElement(), {
+    volume: 1, muted: false, paused: true, currentSrc: "", src: "", crossOrigin: null, srcObject: null, mediaKeys: null,
+    tagName: "AUDIO", isConnected: false, getRootNode() { return this.isConnected ? document : this; }
+  }, props);
+  env.play = el => HTMLMediaElement.prototype.play.call(el);
+  env.settings = settings => listeners.forEach(fn => fn({ source: inner, data: { source: "SoundSphere", type: "SS_MAIN_SETTINGS", payload: settings } }));
+  env.lastStatus = () => [...out].reverse().find(m => m.type === "SS_MAIN_STATUS");
   return env;
 }
 
@@ -717,6 +752,85 @@ function findNode(world, kind) {
     const env = makeFirefoxBgEnv({ content: () => ({ ok: true, backend: "media-element", canBoost: true }) });
     await env.send({ type: "SS_APPLY_SETTINGS", tabId: 3, settings: boost });
     assert(!env.ruleCalls.some(c => c.addRules), "rule added without need");
+  });
+
+  // ---------------- Firefox MAIN-world hidden players (Spotify / SoundCloud)
+  await test("main: play() unchanged; visible players left to the content script", async () => {
+    const env = makeMainWorldEnv();
+    const visible = env.el({ isConnected: true, currentSrc: "blob:https://soundcloud.com/x", volume: 0.5 });
+    assert(env.play(visible) === "native-play" && visible.paused === false, "native play behaviour changed");
+    env.settings({ ...boost, volume: 300 });
+    assert(visible.volume === 0.5 && env.world.mediaSources.length === 0, "visible element touched");
+  });
+
+  await test("main: nothing touched before SoundSphere is used", async () => {
+    const env = makeMainWorldEnv();
+    const el = env.el({ currentSrc: "blob:https://soundcloud.com/x", volume: 0.7 });
+    env.play(el);
+    assert(el.volume === 0.7 && env.world.contexts.length === 0, "acted without settings");
+  });
+
+  await test("main: Spotify-style hidden DRM player gets volume + mute, never rerouted", async () => {
+    const env = makeMainWorldEnv({ origin: "https://open.spotify.com" });
+    const el = env.el({ tagName: "VIDEO", currentSrc: "blob:https://open.spotify.com/x", mediaKeys: {}, volume: 0.8 });
+    env.play(el);
+    env.settings({ ...boost, volume: 50 });
+    assert(Math.abs(el.volume - 0.4) < 1e-9, "volume " + el.volume);
+    env.settings({ ...boost, volume: 400 });
+    assert(Math.abs(el.volume - 0.8) < 1e-9, "DRM player boosted above its own volume: " + el.volume);
+    assert(env.world.mediaSources.length === 0, "DRM player rerouted (would be silent)");
+    env.settings({ ...boost, volume: 0, muted: true });
+    assert(el.muted === true, "mute failed");
+    const st = env.lastStatus();
+    assert(st && st.payload.drm === true && st.payload.media === 1, JSON.stringify(st));
+  });
+
+  await test("main: SoundCloud-style hidden readable player boosts via WebAudio", async () => {
+    const env = makeMainWorldEnv();
+    const el = env.el({ currentSrc: "blob:https://soundcloud.com/hls", volume: 0.6 });
+    env.play(el);
+    env.settings({ ...boost, volume: 80 });
+    assert(env.world.mediaSources.length === 0 && Math.abs(el.volume - 0.48) < 1e-9, "volume cut should stay on the element");
+    env.settings({ ...boost, volume: 250 });
+    assert(env.world.mediaSources.length === 1, "not rerouted for boost");
+    assert(Math.abs(el.volume - 0.6) < 1e-9, "player volume not restored after hook: " + el.volume);
+    const gain = env.world.contexts[0] && [...env.world.mediaSources[0].outputs][0];
+    assert(gain && [...gain.outputs][0].gain.value === 2.5, "bus gain not 2.5");
+    assert(env.lastStatus().payload.hooked === 1, "status not reporting hook");
+  });
+
+  await test("main: hidden cross-origin non-CORS player stays basic (no silent reroute)", async () => {
+    const env = makeMainWorldEnv();
+    const el = env.el({ currentSrc: "https://cf-media.sndcdn.com/a.mp3", volume: 1 });
+    env.play(el);
+    env.settings({ ...boost, volume: 300 });
+    assert(env.world.mediaSources.length === 0, "rerouted unreadable audio");
+  });
+
+  await test("bridge: content status reflects hidden players", async () => {
+    const spotify = makeContentEnv({ origin: "https://open.spotify.com", elements: [] });
+    spotify.postFromPage({ source: "SoundSphereMain", type: "SS_MAIN_STATUS", payload: { media: 1, hooked: 0, readable: 0, drm: true } });
+    let st = await spotify.send({ type: "SS_CONTENT_STATUS" });
+    assert(st.responded && st.value.backend === "protected-basic" && !st.value.canBoost, "spotify " + JSON.stringify(st.value));
+    const sc = makeContentEnv({ origin: "https://soundcloud.com", elements: [] });
+    sc.postFromPage({ source: "SoundSphereMain", type: "SS_MAIN_STATUS", payload: { media: 1, hooked: 0, readable: 1, drm: false } });
+    st = await sc.send({ type: "SS_CONTENT_STATUS" });
+    assert(st.responded && st.value.canBoost, "soundcloud " + JSON.stringify(st.value));
+    await sc.send({ type: "SS_CONTENT_APPLY", settings: { ...boost, volume: 300 } });
+    assert(sc.posted.some(m => m.type === "SS_MAIN_SETTINGS" && m.payload.volume === 300), "settings not sent to page script");
+    const yt = makeContentEnv({ elements: [] });
+    await yt.send({ type: "SS_CONTENT_APPLY", settings: boost });
+    assert(!yt.posted.some(m => m.type === "SS_MAIN_SETTINGS"), "page-script messages sent on unrelated site");
+  });
+
+  await test("manifest: page-world script only on Spotify/SoundCloud, Firefox only", async () => {
+    const fs = require("fs");
+    const ff = JSON.parse(fs.readFileSync(path.join(DIR, "manifest.firefox.json"), "utf8"));
+    const main = ff.content_scripts.filter(c => c.world === "MAIN");
+    const allowed = ["*://open.spotify.com/*", "*://soundcloud.com/*", "*://*.soundcloud.com/*"];
+    assert(main.length === 1 && main[0].matches.every(m => allowed.includes(m)), JSON.stringify(main));
+    const cr = JSON.parse(fs.readFileSync(path.join(DIR, "manifest.json"), "utf8"));
+    assert(!(cr.content_scripts || []).some(c => c.world === "MAIN"), "MAIN world script in Chrome manifest");
   });
 
   // ---------------- popup

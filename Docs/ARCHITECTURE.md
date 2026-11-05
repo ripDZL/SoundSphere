@@ -25,6 +25,11 @@
 - Shared UI:
   - `popup.*`
   - `options.*`
+- Firefox hidden players (`inject/media_main.js`, MAIN world, Spotify + SoundCloud only):
+  - plain same-world wrapper on `HTMLMediaElement.prototype.play` records played elements (max 32)
+  - controls only elements content.js cannot see (detached or in shadow DOM)
+  - volume cut/mute on element (relative to player volume); boost/EQ via page-world WebAudio when readable (not DRM; blob/same-origin/CORS)
+  - bridge: content -> page `SoundSphere/SS_MAIN_SETTINGS`; page -> content `SoundSphereMain/SS_MAIN_STATUS` {media, hooked, readable, drm}
 - Messaging:
   - backgrounds accept control messages only from extension pages (`sender.url`)
   - tab messages time out after 2 s
